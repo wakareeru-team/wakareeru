@@ -1,0 +1,25 @@
+name: wakareeru
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - ipykernel
+  - ipywidgets
+  - numpy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - pillow
+  - httpx
+  - requests
+  - python-dotenv
+  - pyyaml
+  - tqdm
+  - pip:
+      - accelerate
+      - huggingface-hub
+      - openai
+      - torch
+      - torchvision
+      - transformers

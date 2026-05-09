@@ -4,3 +4,16 @@ path:
   raw_img_dir: "data/img"
   cache_dir: "data/cache"
 
+
+# Stage configuration
+active_stages:
+  - stage_01_model_parsing
+
+# Crawler configuration
+
+crawler:
+  # Only active operators will be parsed and included in the final dataset. 
+  # However, shared series with other operators will still be included 
+  # even if the operator is not active.
+  active_operators: ["JR東日本", "JR貨物"]
+
