@@ -1,0 +1,26 @@
+import httpx
+import re
+import json
+import pandas as pd
+import os
+import utils
+current_dir = os.getcwd()
+PROJECT_ROOT = utils.get_project_root()
+
+
+
+def fetch_wikitext(page_title: str) -> str:
+    """获取页面的原始Wikitext"""
+    url = "https://ja.wikipedia.org/w/api.php"
+    params = {
+        "action": "query",
+        "titles": page_title,
+        "prop": "revisions",
+        "rvprop": "content",     # 返回原始wikitext
+        "rvslots": "main",
+        "format": "json",
+    }
+    resp = httpx.get(url, params=params)
+    pages = resp.json()["query"]["pages"]
+    page = next(iter(pages.values()))
+    return page["revisions"][0]["slots"]["main"]["*"]

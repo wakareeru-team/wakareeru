@@ -1,0 +1,6 @@
+# Pipeline configuration file.
+path:
+  db_path: "data/commons_image_manifest.sqlite"
+  raw_img_dir: "data/img"
+  cache_dir: "data/cache"
+
