@@ -3,6 +3,7 @@ path:
   db_path: "data/commons_image_manifest.sqlite"
   raw_img_dir: "data/img"
   cache_dir: "data/cache"
+  series_list_path: 'data/jr_east_freight_series.csv'
 
 
 # Stage configuration

@@ -14,7 +14,6 @@ dependencies:
   - httpx
   - requests
   - python-dotenv
-  - pyyaml
   - tqdm
   - pip:
       - accelerate
@@ -23,3 +22,4 @@ dependencies:
       - torch
       - torchvision
       - transformers
+      - pyyaml
