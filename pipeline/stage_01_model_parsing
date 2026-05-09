@@ -4,9 +4,12 @@ import json
 import pandas as pd
 import os
 import utils
+import asyncio
+import constants
+import re
 current_dir = os.getcwd()
 PROJECT_ROOT = utils.get_project_root()
-
+logger = utils.get_logger("stage_01_model_parsing")
 
 
 def fetch_wikitext(page_title: str) -> str:
@@ -24,3 +27,111 @@ def fetch_wikitext(page_title: str) -> str:
     pages = resp.json()["query"]["pages"]
     page = next(iter(pages.values()))
     return page["revisions"][0]["slots"]["main"]["*"]
+
+async def _fetch_one(
+    client: httpx.AsyncClient, operator_jp: str, operator_en: str, page_title: str
+) -> tuple[str, str, str, str]:
+    params = {
+        "action": "query",
+        "titles": page_title,
+        "prop": "revisions",
+        "rvprop": "content",
+        "rvslots": "main",
+        "format": "json",
+    }
+    resp = await client.get("https://ja.wikipedia.org/w/api.php", params=params)
+    resp.raise_for_status()
+    pages = resp.json()["query"]["pages"]
+    page = next(iter(pages.values()))
+    logger.info(f"页面：{page_title} 请求成功")
+    return page_title, operator_jp, operator_en, page["revisions"][0]["slots"]["main"]["*"]
+
+async def fetch_all(operators: list[tuple[str, str, str]]) -> dict[str, tuple[str, str, str]]:
+    async with httpx.AsyncClient(headers=constants.HEADERS, timeout=30) as client:
+        results = await asyncio.gather(*[_fetch_one(client, jp, en, page) for jp, en, page in operators])
+    # {page_title: (operator_jp, operator_en, wikitext)}
+    return {page: (jp, en, wt) for page, jp, en, wt in results}
+
+
+# ================== 解析车种信息 ==================
+
+def parse_vehicle_wikitext(lines: list[str]) -> list[dict]:
+    link_re = re.compile(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]')
+
+    # 首字符允许数字，覆盖 113系/271系 等纯数字开头的 JR West/Central 型号
+    series_re = re.compile(
+        r'^[A-Za-z゠-ヿ一-鿿\d]'  # 首字符（含数字）
+        r'[A-Za-z゠-ヿ一-鿿\-]*'   # 前缀（含连字符，如HB-E）
+        r'\d+(?:系|形)?$'           # 数字结尾，可选系/形
+    )
+
+    results = []
+    current_h2 = ""
+    current_h3 = ""
+    current_subtype = ""
+    # 跳过 概要，脚注，相关项等非车种列表部分
+    skip_sections = constants.WIKI_PAGE_SKIP_SECTIONS
+
+    for line in lines:
+        line = line.rstrip('\n')
+
+        m = re.match(r'^== (.+?) ==$', line)
+        if m:
+            current_h2 = m.group(1)
+            current_h3 = ""
+            current_subtype = ""
+            continue
+
+        m = re.match(r'^=== (.+?) ===$', line)
+        if m:
+            current_h3 = m.group(1)
+            current_subtype = ""
+            continue
+
+        if current_h2 in skip_sections:
+            continue
+
+        if not line.lstrip().startswith('*'):
+            continue
+
+        # 单星开头的粗体行（* '''xxx'''）才更新 subtype，** 及以上层级不更新
+        subtype = re.match(r'^\*\s*\'\'\'(.+?)\'\'\'', line)
+        if subtype:
+            current_subtype = subtype.group(1).strip().strip('[]')
+
+        for m in link_re.finditer(line):
+            page  = m.group(1)
+            label = m.group(2) or page
+            label = label.split('・')[0].split('（')[0].strip()
+
+            if series_re.match(label):
+                results.append({
+                    "series":     label,
+                    "wiki_title": page,
+                    "status":     constants.STATUS_MAP.get(current_h2, current_h2),
+                    "type":       current_h3,
+                    "subtype":    current_subtype,
+                })
+
+    return results
+
+def canonical_vehicle_key(entry: dict) -> tuple[str, str]:
+    wiki_base = entry["wiki_title"].split("#", 1)[0]
+    return entry["series"], wiki_base
+
+
+def score_entry(entry: dict) -> int:
+    return sum(bool(entry.get(field)) for field in ["type", "subtype", "status", "wiki_title"])
+
+
+def add_unique(items: list, item):
+    if item not in items:
+        items.append(item)
+        
+
+
+
+# ================== pipeline主函数 ==================
+
+def main():
+    

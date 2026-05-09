@@ -1,7 +1,7 @@
 PRAGMA foreign_keys = ON;
 
 -- Commons category tree nodes crawled from Wikimedia Commons.
-CREATE TABLE categories (
+CREATE TABLE IF NOT EXISTS categories (
     category        TEXT PRIMARY KEY,
     parent_category TEXT,
     source_scope    TEXT NOT NULL DEFAULT 'root',    -- 'root' | 'recursive'
@@ -12,7 +12,7 @@ CREATE TABLE categories (
 
 -- Raw image manifest scraped from Wikimedia Commons.
 -- One row per (series, category, file); images can appear in multiple categories.
-CREATE TABLE images (
+CREATE TABLE IF NOT EXISTS images (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
 
     -- Label provenance
@@ -59,7 +59,7 @@ CREATE TABLE images (
 );
 
 -- Many-to-many: file ↔ category memberships across the crawl depth.
-CREATE TABLE image_categories (
+CREATE TABLE IF NOT EXISTS image_categories (
     file_title   TEXT NOT NULL,
     category     TEXT NOT NULL,
     source_scope TEXT NOT NULL DEFAULT 'root', -- 'root' | 'recursive'
@@ -68,7 +68,7 @@ CREATE TABLE image_categories (
 
 -- Bounding-box crops detected by Grounding-DINO.
 -- Only bbox metadata is stored; actual crops are generated on-the-fly at training time.
-CREATE TABLE crops (
+CREATE TABLE IF NOT EXISTS crops (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     image_id            INTEGER NOT NULL REFERENCES images(id),
 
@@ -101,7 +101,7 @@ CREATE TABLE crops (
     UNIQUE (image_id, detector_model, nms_iou_threshold, crop_index)
 );
 
-CREATE INDEX idx_crops_image_id   ON crops(image_id);
-CREATE INDEX idx_crops_series     ON crops(series);
-CREATE INDEX idx_crops_power_type ON crops(power_type);
-CREATE INDEX idx_crops_detector   ON crops(detector_model, nms_iou_threshold);
+CREATE INDEX IF NOT EXISTS idx_crops_image_id   ON crops(image_id);
+CREATE INDEX IF NOT EXISTS idx_crops_series     ON crops(series);
+CREATE INDEX IF NOT EXISTS idx_crops_power_type ON crops(power_type);
+CREATE INDEX IF NOT EXISTS idx_crops_detector   ON crops(detector_model, nms_iou_threshold);
