@@ -22,3 +22,62 @@ STATUS_MAP = {
     "在来線廃止車両":   "廃止",
     "導入予定車両":     "導入予定",
 }
+
+
+EXCLUDED_TYPES = ["貨車", "客車"]
+
+EXCLUDED_SUBTYPES = ["旧形営業用", "旧形事業用"]
+
+
+OPERATOR_PREFIX = {
+    "JR東日本": "JR East",
+    "JR東海":   "JR Central",
+    "JR西日本": "JR West",
+    "JR九州":   "JR Kyushu",
+    "JR北海道": "JR Hokkaido",
+    "JR四国":   "JR Shikoku",
+    "JR貨物":   "JR Freight",
+}
+
+_DIGRAPHS = {
+    'キャ':'kya','キュ':'kyu','キョ':'kyo',
+    'シャ':'sha','シュ':'shu','ショ':'sho',
+    'チャ':'cha','チュ':'chu','チョ':'cho',
+    'ニャ':'nya','ニュ':'nyu','ニョ':'nyo',
+    'ヒャ':'hya','ヒュ':'hyu','ヒョ':'hyo',
+    'ミャ':'mya','ミュ':'myu','ミョ':'myo',
+    'リャ':'rya','リュ':'ryu','リョ':'ryo',
+    'ギャ':'gya','ギュ':'gyu','ギョ':'gyo',
+    'ジャ':'ja', 'ジュ':'ju', 'ジョ':'jo',
+    'ビャ':'bya','ビュ':'byu','ビョ':'byo',
+    'ピャ':'pya','ピュ':'pyu','ピョ':'pyo',
+}
+_SINGLE = {
+    'ア':'a', 'イ':'i', 'ウ':'u', 'エ':'e', 'オ':'o',
+    'カ':'ka','キ':'ki','ク':'ku','ケ':'ke','コ':'ko',
+    'サ':'sa','シ':'shi','ス':'su','セ':'se','ソ':'so',
+    'タ':'ta','チ':'chi','ツ':'tsu','テ':'te','ト':'to',
+    'ナ':'na','ニ':'ni','ヌ':'nu','ネ':'ne','ノ':'no',
+    'ハ':'ha','ヒ':'hi','フ':'fu','ヘ':'he','ホ':'ho',
+    'マ':'ma','ミ':'mi','ム':'mu','メ':'me','モ':'mo',
+    'ヤ':'ya','ユ':'yu','ヨ':'yo',
+    'ラ':'ra','リ':'ri','ル':'ru','レ':'re','ロ':'ro',
+    'ワ':'wa','ヲ':'wo','ン':'n',
+    'ガ':'ga','ギ':'gi','グ':'gu','ゲ':'ge','ゴ':'go',
+    'ザ':'za','ジ':'ji','ズ':'zu','ゼ':'ze','ゾ':'zo',
+    'ダ':'da','デ':'de','ド':'do',
+    'バ':'ba','ビ':'bi','ブ':'bu','ベ':'be','ボ':'bo',
+    'パ':'pa','ピ':'pi','プ':'pu','ペ':'pe','ポ':'po',
+}
+
+COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
+COMMONS_HEADERS = {"User-Agent": "TrainDatasetBuilder/1.0 (research; fengyukunfyk@gmail.com)"}
+
+
+
+
+
+
+
+
+# ========= STAGE 2 图片爬取 =========

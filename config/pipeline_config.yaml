@@ -4,11 +4,11 @@ path:
   raw_img_dir: "data/img"
   cache_dir: "data/cache"
   series_list_path: 'data/jr_east_freight_series.csv'
+  series_commons_path: 'data/jr_east_freight_series_wiki_commons.csv'
+  commons_review_path: 'data/review/commons_root_review.csv'
+  manual_series_overrides_path: 'config/manual_series_overrides.csv'
 
 
-# Stage configuration
-active_stages:
-  - stage_01_model_parsing
 
 # Crawler configuration
 

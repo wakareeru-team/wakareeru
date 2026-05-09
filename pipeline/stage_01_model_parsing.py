@@ -6,7 +6,6 @@ import os
 import utils
 import asyncio
 import constants
-import re
 current_dir = os.getcwd()
 PROJECT_ROOT = utils.get_project_root()
 logger = utils.get_logger("stage_01_model_parsing")
@@ -215,29 +214,12 @@ def main(config = None):
     logger.info(f"共解析出 {len(all_series)} 个车型")
     logger.info('子车型:' + all_series['type'].value_counts().to_string())
     
-    # ============== 人工特例过滤 ==============
-    # 特例覆盖：key=(series, wiki_title 去掉 #anchor)，value=需要覆盖的字段 dict
-    OVERRIDES: dict[tuple[str, str], dict] = {
-        ("E001形", "TRAIN SUITE 四季島"): {"full_name": "JR東日本E001形クルーズトレイン「TRAIN SUITE 四季島」"},
-    }
-
-    wiki_title_base = all_series["wiki_title"].str.split("#", n=1).str[0]
-    for (series, wiki_title), override in OVERRIDES.items():
-        mask = (all_series["series"] == series) & (wiki_title_base == wiki_title)
-        for field, value in override.items():
-            all_series.loc[mask, field] = value
-
-    
     all_df = pd.DataFrame(all_series)
     #滤除对象：货车，因为多为货列连挂，难以找到单独的车辆照片，一阶段暂时跳过；客车，理由类似，一阶段保留
-    excluding_types = ["貨車", "客車"]
+    excluding_types = constants.EXCLUDED_TYPES
     filtered_df = all_df[~all_df['type'].isin(excluding_types)]
-    filtered_df['type'].value_counts()
-    filtered_df['subtype'].value_counts()
-    filtered_df[filtered_df['subtype'] == "旧形営業用"]
-    
     #现在滤除二级，对象为旧式营业车和事业用车
-    exclduing_subtypes = ["旧形営業用", "旧形事業用"]
+    exclduing_subtypes = constants.EXCLUDED_SUBTYPES
     final_df = filtered_df[~filtered_df['subtype'].isin(exclduing_subtypes)]
     final_df['type'].value_counts()
     final_df['subtype'].value_counts()
@@ -280,5 +262,9 @@ def main(config = None):
     export_df.to_csv(os.path.join(PROJECT_ROOT, "data", "jr_east_freight_series.csv"), index=False, encoding="utf-8")
     export_df.to_csv(config['path']['series_list_path'], index=False, encoding="utf-8")
     logger.info(f"车型列表已保存到 {config['path']['series_list_path']},共 {len(export_df)} 条记录")
+    
+    
+    
+    
 if __name__ == "__main__":
     main()

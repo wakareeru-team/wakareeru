@@ -3,6 +3,7 @@ import logging
 import re
 import sqlite3
 import sys
+import os
 # ================ Path Utils ================
 
 def get_project_root():
@@ -14,6 +15,8 @@ def get_project_root():
 
 PROJECT_ROOT = get_project_root()
 
+def join_root_path(relative_path: str) -> str:
+    return os.path.join(PROJECT_ROOT, relative_path)
 # ================ Config Utils ================
 
 def load_pipeline_config(config_path: str | Path | None = None) -> dict:
