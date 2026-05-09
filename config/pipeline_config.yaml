@@ -17,4 +17,9 @@ crawler:
   # However, shared series with other operators will still be included 
   # even if the operator is not active.
   active_operators: ["JR東日本", "JR貨物"]
-
+  full_series_crawling: false
+  manifest_max_files_per_category: 50
+  # 0 = only root category; positive numbers recurse into subcategories; -1 = unlimited.
+  manifest_max_depth: 4
+  series_test_scope: ["E231系", "キハ40系", "EF510形", "DD51形", "C57形", "キハ141系","E233系", "E353系", "E657系", "E5系", "E6系", "EF64形", "E7系",'EF81形','E235系','キハ110系',
+        '113系','485系','E217系','E257系']

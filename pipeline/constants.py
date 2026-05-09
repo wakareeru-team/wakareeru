@@ -74,10 +74,35 @@ COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
 COMMONS_HEADERS = {"User-Agent": "TrainDatasetBuilder/1.0 (research; fengyukunfyk@gmail.com)"}
 
 
+# ========= STAGE 3 manifest爬取 =========
+
+FILE_EXCLUDE_PATTERNS = (
+    "interior", "inside", "seat", "seats", "seating", "reclining", "free-space",
+    "cab", "cockpit", "toilet", "wc", "route map", "counter", "merchandising counter",
+    "display", "lcd", "vvvf", "logo", "air cleaner", "antenna", "pantograph",
+    "camera", "accident", "syanai", "車内", "運転台", "運転室", "トイレ", "便所","カメラ", "事故", "車内",
+    "trainchannel",
+    "運転台", "運転室", "トイレ", "便所",
+    "洗面所", "洗面台", "モニター", "カウンター", "停車駅案内", "案内表示器",
+    "パンタグラフ", "エアクリーナー", "集電装置", "エアコン", "クーラー",
+)
+
+CATEGORY_EXCLUDE_PATTERNS = (
+    "interior", "inside", "parts", "seats", "information display", "mockup","green car"
+)
+
+SERIES_CATEGORY_EXCLUDE_PATTERNS = {
+    #"E231系": ("tokyu", "tōkyū", "toei", "shibuya hikarie"),
+}
+
+POWER_TYPE_MAP = {
+    "電車": "EMU",
+    "新幹線電車": "EMU",
+    "気動車": "DMU",
+    "電気機関車": "Electric Locomotive",
+    "ディーゼル機関車": "Diesel Locomotive",
+    "蒸気機関車": "Steam Locomotive",
+    "電気・ディーゼル両用（EDC方式）車両": "Electro-diesel Multiple Unit",
+}
 
 
-
-
-
-
-# ========= STAGE 2 图片爬取 =========
