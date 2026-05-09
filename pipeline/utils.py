@@ -73,26 +73,11 @@ def init_db(
     db_path: str | Path | None = None,
     schema_path: str | Path | None = None,
     migrations_dir: str | Path | None = None,
-) -> sqlite3.Connection:
+) -> None:
     """Initialize the SQLite database from config/schema.sql without dropping data."""
-    if db_path is None:
-        config = load_pipeline_config()
-        db_path = config["path"]["db_path"]
-    schema_path = Path(schema_path or PROJECT_ROOT / "config" / "schema.sql")
-
-    if db_path == ":memory:":
-        resolved_db_path = db_path
-    else:
-        resolved_db_path = Path(db_path)
-        if not resolved_db_path.is_absolute():
-            resolved_db_path = PROJECT_ROOT / resolved_db_path
-        resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not schema_path.is_absolute():
-        schema_path = PROJECT_ROOT / schema_path
-    migrations_dir = Path(migrations_dir or PROJECT_ROOT / "config" / "migrations")
-    if not migrations_dir.is_absolute():
-        migrations_dir = PROJECT_ROOT / migrations_dir
+    resolved_db_path = resolve_db_path(db_path)
+    schema_path = resolve_project_path(schema_path or PROJECT_ROOT / "config" / "schema.sql")
+    migrations_dir = resolve_project_path(migrations_dir or PROJECT_ROOT / "config" / "migrations")
 
     schema_sql = schema_path.read_text(encoding="utf-8")
 
@@ -105,10 +90,37 @@ def init_db(
         conn.execute("PRAGMA foreign_keys = ON")
         conn.commit()
     except Exception:
-        conn.close()
+        conn.rollback()
         raise
+    finally:
+        conn.close()
 
+
+def connect_db(db_path: str | Path | None = None) -> sqlite3.Connection:
+    """Open a SQLite connection for callers that need to own DB lifecycle."""
+    conn = sqlite3.connect(resolve_db_path(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def resolve_db_path(db_path: str | Path | None = None) -> str | Path:
+    if db_path is None:
+        config = load_pipeline_config()
+        db_path = config["path"]["db_path"]
+
+    if db_path == ":memory:":
+        return db_path
+
+    resolved_db_path = resolve_project_path(db_path)
+    resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
+    return resolved_db_path
+
+
+def resolve_project_path(path: str | Path) -> Path:
+    path = Path(path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
 
 
 def migration_version(path: Path) -> int:
