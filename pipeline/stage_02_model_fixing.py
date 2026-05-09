@@ -15,7 +15,7 @@ import utils
 PROJECT_ROOT = utils.get_project_root()
 logger = utils.get_logger("stage_02_model_fixing")
 
-MANUAL_ACTIONS = {"set", "keep", "exclude"}
+MANUAL_ACTIONS = constants.MANUAL_ACTIONS
 MANUAL_KEY_COLUMNS = {"series", "wiki_title"}
 MANUAL_META_COLUMNS = MANUAL_KEY_COLUMNS | {"action", "reason", "comment"}
 MANUAL_COLUMN_ALIASES = {
@@ -134,12 +134,12 @@ def apply_manual_pre_root(df: pd.DataFrame, manual_overrides: dict[tuple[str, st
     keep_mask = []
     for idx, row in df.iterrows():
         override = _manual_for_row(row, manual_overrides)
-        if override and override["action"] == "exclude":
+        if override and override["action"] == constants.MANUAL_ACTION_EXCLUDE:
             keep_mask.append(False)
             continue
 
         keep_mask.append(True)
-        if override and override["action"] == "set":
+        if override and override["action"] == constants.MANUAL_ACTION_SET:
             df.at[idx, MANUAL_SOURCE_SERIES_COL] = row["series"]
             df.at[idx, MANUAL_SOURCE_WIKI_TITLE_COL] = row["wiki_title"]
             for col, value in override["values"].items():
@@ -156,7 +156,7 @@ def apply_manual_output(df: pd.DataFrame, manual_overrides: dict[tuple[str, str]
     df = df.copy()
     for idx, row in df.iterrows():
         override = _manual_for_row(row, manual_overrides)
-        if not override or override["action"] != "set":
+        if not override or override["action"] != constants.MANUAL_ACTION_SET:
             continue
         for col, value in override["values"].items():
             if col in df.columns:
@@ -257,7 +257,11 @@ def series_to_commons_prefixes(
     wiki_title: str,
     manual: dict | None = None,
 ) -> list[str]:
-    if manual and manual["action"] == "set" and manual["values"].get("commons_prefix"):
+    if (
+        manual
+        and manual["action"] == constants.MANUAL_ACTION_SET
+        and manual["values"].get("commons_prefix")
+    ):
         return [manual["values"]["commons_prefix"]]
 
     name = re.sub(r"[系形]$", "", series)
@@ -470,7 +474,11 @@ def find_commons_root(
         manual=manual,
     )
 
-    if manual and manual["action"] == "set" and manual["values"].get("commons_root_category"):
+    if (
+        manual
+        and manual["action"] == constants.MANUAL_ACTION_SET
+        and manual["values"].get("commons_root_category")
+    ):
         root = manual["values"]["commons_root_category"]
         operator_roots = (
             _parse_manual_mapping(manual["values"]["commons_operator_roots"])
@@ -501,7 +509,7 @@ def find_commons_root(
             operator_roots[op_en] = op_root["commons_root_category"]
 
     root["commons_operator_roots"] = operator_roots
-    if manual and manual["action"] == "keep":
+    if manual and manual["action"] == constants.MANUAL_ACTION_KEEP:
         root["commons_root_decision"] = f'人工保留：{root["commons_root_decision"]}'
         root["needs_review"] = False
     return root

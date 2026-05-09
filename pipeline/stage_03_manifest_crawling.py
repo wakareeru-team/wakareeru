@@ -299,22 +299,29 @@ def upsert_image_records(
     conn: sqlite3.Connection,
     category: str,
     records: list[dict],
-    source_scope: str = "root",
+    source_scope: str = constants.CATEGORY_SOURCE_SCOPE_ROOT,
     parent_category: str | None = None,
 ) -> None:
     """Upsert image records while preserving future download status fields."""
     conn.execute(
         """
         INSERT INTO categories(category, parent_category, source_scope, fetched_at, fetch_status, error)
-        VALUES (?, ?, ?, ?, 'ok', NULL)
+        VALUES (?, ?, ?, ?, ?, NULL)
         ON CONFLICT(category) DO UPDATE SET
             parent_category=COALESCE(excluded.parent_category, categories.parent_category),
             source_scope=excluded.source_scope,
             fetched_at=excluded.fetched_at,
-            fetch_status='ok',
+            fetch_status=?,
             error=NULL
         """,
-        (category, parent_category, source_scope, utc_now()),
+        (
+            category,
+            parent_category,
+            source_scope,
+            utc_now(),
+            constants.FETCH_STATUS_OK,
+            constants.FETCH_STATUS_OK,
+        ),
     )
     for record in records:
         conn.execute(
@@ -439,7 +446,11 @@ def crawl_root_manifest_sample(
                 # Write one category at a time so each category can keep its own source_scope.
                 for category, group in records_df.groupby("category", sort=False):
                     first_path = json.loads(group.iloc[0]["category_path_json"])
-                    source_scope = "root" if len(first_path) == 1 else "recursive"
+                    source_scope = (
+                        constants.CATEGORY_SOURCE_SCOPE_ROOT
+                        if len(first_path) == 1
+                        else constants.CATEGORY_SOURCE_SCOPE_RECURSIVE
+                    )
                     parent_category = first_path[-2] if len(first_path) > 1 else None
                     # Compatible with older notebook kernels where upsert_image_records
                     # was defined before parent_category existed. Re-run the write helper
