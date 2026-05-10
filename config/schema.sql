@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS images (
     -- Filtering state (keyword filter, SigLIP2 classifier)
     excluded            INTEGER NOT NULL DEFAULT 0,
     exclude_reason      TEXT,               -- e.g. "interior" | "file:seat" | "category:parts"
+    siglip_processed    INTEGER NOT NULL DEFAULT 0,
 
     -- Download state
     download_status     TEXT NOT NULL DEFAULT 'not_started', -- 'not_started' | 'downloaded' | 'failed' | 'missing_url'

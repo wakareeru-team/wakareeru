@@ -120,15 +120,17 @@ CROP_STATUSES = {
 
 # ========= STAGE 3 manifest爬取 =========
 
-FILE_EXCLUDE_PATTERNS = (
+FILE_INTERIOR_PATTERNS = (
     "interior", "inside", "seat", "seats", "seating", "reclining", "free-space",
     "cab", "cockpit", "toilet", "wc", "route map", "counter", "merchandising counter",
-    "display", "lcd", "vvvf", "logo", "air cleaner", "antenna", "pantograph",
-    "camera", "accident", "syanai", "車内", "運転台", "運転室", "トイレ", "便所","カメラ", "事故", "車内",
-    "trainchannel",
-    "運転台", "運転室", "トイレ", "便所",
-    "洗面所", "洗面台", "モニター", "カウンター", "停車駅案内", "案内表示器",
-    "パンタグラフ", "エアクリーナー", "集電装置", "エアコン", "クーラー",
+    "display", "lcd", "trainchannel", "syanai", "camera",
+    "車内", "運転台", "運転室", "トイレ", "便所", "洗面所", "洗面台",
+    "モニター", "カウンター", "停車駅案内", "案内表示器", "カメラ",
+)
+
+FILE_DETAIL_PATTERNS = (
+    "vvvf", "logo", "air cleaner", "antenna", "pantograph", "accident",
+    "パンタグラフ", "エアクリーナー", "集電装置", "エアコン", "クーラー", "事故",
 )
 
 CATEGORY_EXCLUDE_PATTERNS = (
@@ -150,3 +152,24 @@ POWER_TYPE_MAP = {
 }
 
 
+
+# 图片过滤相关的常量
+SIGLIP_VIEW_CANDIDATES = [
+    "an image of the interior of a train",
+    "an image of whole exterior view of a train",
+    "an image of a detailed close-up of the exterior part of a train",
+    "an image of information monitor or map of a train"
+]
+SIGLIP_PROMPT_TO_LABEL = {
+    "an image of the interior of a train": "interior",
+    "interior": "interior",
+    "an image of whole exterior view of a train": "exterior",
+    "an image of information monitor or map of a train": "display",
+    "exterior": "exterior",
+    "display": "display",
+    "an image of a detailed close-up of the exterior part of a train": "detailed",
+    "detailed": "detailed",
+    "uncertain":"uncertain"
+}
+
+KEEP_LABELS = {"exterior", "uncertain"}

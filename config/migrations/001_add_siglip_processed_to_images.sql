@@ -1,0 +1,2 @@
+ALTER TABLE images
+ADD COLUMN siglip_processed INTEGER NOT NULL DEFAULT 0;

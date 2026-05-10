@@ -12,6 +12,7 @@ import pipeline.stage_01_model_parsing as stage_01
 import pipeline.stage_02_model_fixing as stage_02
 import pipeline.stage_03_manifest_crawling as stage_03
 import pipeline.stage_04_img_crawler as stage_04
+import pipeline.stage_05_siglip_image_filtering as stage_05
 
 logger = get_logger("run_pipeline")
 
@@ -20,7 +21,7 @@ STAGES: dict[str, tuple[str, callable]] = { #type: ignore
     "model_fixing":           ("车型人工修正与 Commons 映射", stage_02.main),
     "manifest_crawling":      ("Commons图片关键词过滤后manifest 爬取", stage_03.main),
     "img_crawling":           ("图片爬取",            stage_04.main),
-    # "siglip_filter":  ("SigLIP2 外景过滤",  stage_03.main),
+    "siglip_filter":          ("SigLIP2 image filtering", stage_05.main),
     # "gdino_crop":     ("Grounding-DINO 裁切", stage_04.main),
     # "llm_trace":      ("LLM trace 提取",    stage_05.main),
     # "small_loss":     ("Small Loss 噪声检测", stage_06.main),

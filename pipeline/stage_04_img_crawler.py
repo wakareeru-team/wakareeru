@@ -247,7 +247,7 @@ def batch_download_manifest_from_db(
                 results = []
                 for record in rows:
                     last_id = max(last_id, int(record["id"]))
-                    result = download_one_image(record, conn)
+                    result = download_one_image(record, conn,config["crawler"]["download_max_retries"])
                     results.append(result)
                     counts[result["status"]] += 1
                     processed += 1
@@ -279,4 +279,7 @@ def main(config: dict | None = None):
         retry_failed=_as_bool(crawler_config["download_retry_failed"], default=True),
         log_path=log_path,
     )
-    logger.info("Download result: %s", result)
+    logger.info("下载结果: %s", result)
+
+if __name__ == "__main__":
+    main()

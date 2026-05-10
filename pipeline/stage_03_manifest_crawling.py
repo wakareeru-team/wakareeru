@@ -225,12 +225,13 @@ def build_image_records(
     for member in members:
         file_title = member["title"]
         info = info_by_title.get(file_title, {})
-        file_exclude = has_excluded_pattern(file_title, constants.FILE_EXCLUDE_PATTERNS)
         exclude_reason = None
         if category_exclude:
             exclude_reason = category_exclude
-        elif file_exclude:
-            exclude_reason = f"file:{file_exclude}"
+        elif has_excluded_pattern(file_title, constants.FILE_INTERIOR_PATTERNS):
+            exclude_reason = "interior"
+        elif has_excluded_pattern(file_title, constants.FILE_DETAIL_PATTERNS):
+            exclude_reason = "detail"
 
         records.append({
             "series": row["series"],
