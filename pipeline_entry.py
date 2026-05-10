@@ -13,7 +13,8 @@ import pipeline.stage_02_model_fixing as stage_02
 import pipeline.stage_03_manifest_crawling as stage_03
 import pipeline.stage_04_img_crawler as stage_04
 import pipeline.stage_05_siglip_image_filtering as stage_05
-
+import pipeline.stage_06_llm_metadata_labeling as stage_06
+import pipeline.stage_07_gdino_bbox as stage_07
 logger = get_logger("run_pipeline")
 
 STAGES: dict[str, tuple[str, callable]] = { #type: ignore
@@ -22,9 +23,8 @@ STAGES: dict[str, tuple[str, callable]] = { #type: ignore
     "manifest_crawling":      ("Commons图片关键词过滤后manifest 爬取", stage_03.main),
     "img_crawling":           ("图片爬取",            stage_04.main),
     "siglip_filter":          ("SigLIP2 image filtering", stage_05.main),
-    # "gdino_crop":     ("Grounding-DINO 裁切", stage_04.main),
-    # "llm_trace":      ("LLM trace 提取",    stage_05.main),
-    # "small_loss":     ("Small Loss 噪声检测", stage_06.main),
+    "llm_labeling":          ("LLM 车型信息解析",    stage_06.main),
+    "gdino_bbox":     ("Grounding-DINO 主体裁切与后处理", stage_07.main),
 }
 STAGE_KEYS = list(STAGES.keys())
 

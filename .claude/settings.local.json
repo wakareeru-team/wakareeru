@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(python)",
+      "Bash(find \"c:\\\\Users\\\\fengy\\\\wakareeru\\\\src\" -type f -name \"*.py\" 2>nul)",
+      "Bash(ls -la \"c:\\\\Users\\\\fengy\\\\wakareeru\\\\\" | head -20)",
+      "Read(//c/Users/fengy/**)",
+      "Bash(xargs ls -la)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\fengy\\wakareeru"
+    ]
+  }
+}

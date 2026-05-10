@@ -49,3 +49,13 @@ llm_labeling:
   batch_size: 5
   max_retries: 3
   openai_model_name: "gpt-5.4-mini"
+
+# GDINO bbox detection and post-processing configuration
+gdino:
+  model_name: IDEA-Research/grounding-dino-base
+  box_threshold: 0.2
+  text_threshold: 0.2
+  nms_iou_threshold: 0.5
+  batch_size: 8
+  outer_batch_size: 80
+  reprocess: false

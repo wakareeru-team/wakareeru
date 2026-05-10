@@ -1,0 +1,18 @@
+series,wiki_title,action,set_series,set_wiki_title,full_name,operator_jp,operator_en,commons_prefix,commons_root_category,commons_operator_roots,needs_review,reason
+E001形,TRAIN SUITE 四季島,set,,,JR東日本E001形クルーズトレイン「TRAIN SUITE 四季島」,,,,,,,manual full name
+481系,国鉄485系電車,set,,,,,,JNR 485,,,,481/483/485/489 share Commons category
+921形,ドクターイエロー#921形,set,922形,,,['国鉄'],['JNR'],Shinkansen 922,Shinkansen 922,{'JNR': 'Shinkansen 922'},False,manual correction from 921 to 922
+952形,新幹線952形・953形電車,set,952/953形,,,,,Shinkansen 952,Shinkansen 952/953,{'JR East': 'Shinkansen 952/953'},False,merge 952 and 953
+953形,新幹線952形・953形電車,exclude,,,,,,,,,,merged into 952/953形
+キハ100系,JR東日本キハ100系・キハ110系気動車,set,,,,,,JR East KiHa 100 series,JR East KiHa 100 series,{'JR East': 'JR East KiHa 100 series'},False,manual completion
+キハ110系,JR東日本キハ100系・キハ110系気動車,set,,,,,,JR East KiHa 110 series,JR East KiHa 110 series,{'JR East': 'JR East KiHa 110 series'},False,manual completion
+EF510形,JR貨物EF510形電気機関車,set,,,,"['JR東日本', 'JR貨物']","['JR East', 'JR Freight']",JR Freight EF510,JR Freight EF510,"{'JR East': 'JR East EF510-500', 'JR Freight': 'JR Freight EF510'}",False,manual multi-operator root
+DD19形,国鉄DD17形ディーゼル機関車#DD19形,set,,,,,,JR East DD19,JR East DD19,{'JR East': 'JR East DD19'},False,manual completion
+キハ141系,JR北海道キハ141系気動車,set,,,,['JR北海道'],['JR Hokkaido'],JR Hokkaido Kiha 141,JR Hokkaido Kiha 141,{'JR Hokkaido': 'JR Hokkaido Kiha 141'},False,manual completion
+DD17形,国鉄DD17形ディーゼル機関車,exclude,,,,,,,,,,no Commons root; old crawler skipped rootless rows
+DD18形,JR東日本DD18形ディーゼル機関車,exclude,,,,,,,,,,no Commons root; old crawler skipped rootless rows
+483系,国鉄485系電車,exclude,,,,,,,,,,covered by 485系/JNR 485; old crawler skipped rootless row
+453系,国鉄457系電車,exclude,,,,,,,,,,covered by 457系/JNR 457; old crawler skipped rootless row
+901系,JR東日本209系電車,exclude,,,,,,,,,,covered by 209系; old crawler skipped rootless row
+クモヤ743形,JR東日本クモヤ743形電車,exclude,,,,,,,,,,no Commons root; old crawler skipped rootless rows
+ED500形,JR貨物ED500形電気機関車,exclude,,,,,,,,,,no Commons root; old crawler skipped rootless rows
