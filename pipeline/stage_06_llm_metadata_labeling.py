@@ -105,5 +105,40 @@ def main(config: dict | None = None):
     
     llm_details.to_csv(os.path.join(PROJECT_ROOT, "data", "llm_category_details.csv"), index=False)
 
+    
+        # 将 category details 回写到 images 表。幂等。
+    DETAIL_COLS = ["submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery"]
+
+    llm_details = pd.read_csv(os.path.join(PROJECT_ROOT, "data", "llm_category_details.csv"), dtype={"bandai": str})
+
+    def sql_null(v):
+        """Coerce empty/sentinel strings to None so SQLite stores NULL."""
+        if pd.isna(v):
+            return None
+        v = str(v).strip()
+        return None if v.lower() in {"", "nan", "none", "null"} else v
+
+    # Only normalize the text detail columns — category_path holds lists and must not be touched.
+    llm_details[DETAIL_COLS] = llm_details[DETAIL_COLS].map(sql_null)
+
+    missing = [c for c in ["category_path_json", *DETAIL_COLS] if c not in llm_details.columns]
+    if missing:
+        raise ValueError(f"details missing columns: {missing}")
+
+    with sqlite3.connect(IMAGE_DB_PATH) as conn:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(images)")}
+        for col in DETAIL_COLS:
+            if col not in existing:
+                conn.execute(f"ALTER TABLE images ADD COLUMN {col} TEXT")
+
+        set_clause = ", ".join(f"{col} = ?" for col in DETAIL_COLS)
+        update_rows = llm_details[DETAIL_COLS + ["category_path_json"]].values.tolist()
+        conn.executemany(f"UPDATE images SET {set_clause} WHERE category_path_json = ?", update_rows)
+        conn.commit()
+
+        print(f"detail category paths written: {len(update_rows)}")
+    
+    
+
 if __name__ == "__main__":
     main()
