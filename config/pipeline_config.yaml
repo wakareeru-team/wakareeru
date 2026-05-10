@@ -7,7 +7,7 @@ path:
   series_commons_path: 'data/jr_east_freight_series_wiki_commons.csv'
   commons_review_path: 'data/review/commons_root_review.csv'
   manual_series_overrides_path: 'config/manual_series_overrides.csv'
-
+  img_crawl_log_path: 'data/img_crawl_checkpoint.csv'
 
 
 # Crawler configuration
@@ -21,5 +21,9 @@ crawler:
   manifest_max_files_per_category: 50
   # 0 = only root category; positive numbers recurse into subcategories; -1 = unlimited.
   manifest_max_depth: 4
+  download_batch_size: 500
+  # -1 = no cap; positive numbers download at most that many pending rows.
+  download_total_limit: -1
+  download_retry_failed: true
   series_test_scope: ["E231系", "キハ40系", "EF510形", "DD51形", "C57形", "キハ141系","E233系", "E353系", "E657系", "E5系", "E6系", "EF64形", "E7系",'EF81形','E235系','キハ110系',
         '113系','485系','E217系','E257系']

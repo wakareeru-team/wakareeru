@@ -11,15 +11,15 @@ if str(PIPELINE_DIR) not in sys.path:
 import pipeline.stage_01_model_parsing as stage_01
 import pipeline.stage_02_model_fixing as stage_02
 import pipeline.stage_03_manifest_crawling as stage_03
-
+import pipeline.stage_04_img_crawler as stage_04
 
 logger = get_logger("run_pipeline")
 
-STAGES: dict[str, tuple[str, callable]] = {
+STAGES: dict[str, tuple[str, callable]] = { #type: ignore
     "model_parsing":          ("车辆型号解析",         stage_01.main),
     "model_fixing":           ("车型人工修正与 Commons 映射", stage_02.main),
-    "manifest_crawling":      ("Commons 图片 manifest 爬取", stage_03.main),
-    # "keyword_filter": ("关键词粗筛",         stage_04.main),
+    "manifest_crawling":      ("Commons图片关键词过滤后manifest 爬取", stage_03.main),
+    "img_crawling":           ("图片爬取",            stage_04.main),
     # "siglip_filter":  ("SigLIP2 外景过滤",  stage_03.main),
     # "gdino_crop":     ("Grounding-DINO 裁切", stage_04.main),
     # "llm_trace":      ("LLM trace 提取",    stage_05.main),
