@@ -236,7 +236,7 @@ def main(config: dict | None = None):
     rules_path = utils.join_root_path(config.get("llm_labeling", {}).get(
         "fine_grained_rules_path", "config/migrations/manual_fine_grained_series.csv"
     ))
-    logger.info("Applying fine-grained series splits from %s", rules_path)
+    logger.info("已对以下车型应用人工细分类别： %s", rules_path)
     with sqlite3.connect(IMAGE_DB_PATH) as conn:
         apply_fine_grained_labels(conn, rules_path)
 

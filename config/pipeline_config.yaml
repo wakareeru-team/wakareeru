@@ -49,6 +49,14 @@ llm_labeling:
   batch_size: 5
   max_retries: 3
   openai_model_name: "gpt-5.4-mini"
+  fine_grained_rules_path: "config/migrations/manual_fine_grained_series.csv"
+
+# Small Loss Trick噪声检测配置
+noise_detection:
+  # 用于noise detection训练的分类粒度。粒度越细，同series内视觉差异大的子型号
+  # 不会互相被标为噪声，降低误判率。
+  # 选项: "series" | "fine_grained_series" | "submodel"
+  label_granularity: "fine_grained_series"
 
 # GDINO bbox detection and post-processing configuration
 gdino:
