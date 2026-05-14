@@ -4,6 +4,18 @@ import re
 import sqlite3
 import sys
 import os
+import pandas as pd
+import numpy as np
+from PIL import Image, ImageOps
+# ================ Config Utils ================
+
+def load_pipeline_config(config_path: str | Path | None = None) -> dict:
+    import yaml
+
+    config_path = Path(config_path) if config_path else PROJECT_ROOT / "config" / "pipeline_config.yaml"
+    with config_path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
 # ================ Path Utils ================
 
 def get_project_root():
@@ -14,27 +26,59 @@ def get_project_root():
     raise RuntimeError(f"Project root not found from {current}")
 
 PROJECT_ROOT = get_project_root()
+IMG_ROOT = os.path.join(PROJECT_ROOT, load_pipeline_config()['path']['raw_img_dir'])
 
 def join_root_path(relative_path: str) -> str:
     return os.path.join(PROJECT_ROOT, relative_path)
-# ================ Config Utils ================
-
-def load_pipeline_config(config_path: str | Path | None = None) -> dict:
-    import yaml
-
-    config_path = Path(config_path) if config_path else PROJECT_ROOT / "config" / "pipeline_config.yaml"
-    with config_path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 # ================ Image Processing Utils ================
 def load_img_with_orientation(path):
-    from PIL import Image, ImageOps
+    
 
     img = Image.open(path).convert("RGB")
     img = ImageOps.exif_transpose(img)  # 确保方向正确
     return img
 
 
+def _source_image_path(row: pd.Series | dict, img_root: Path = IMG_ROOT) -> Path: # type: ignore
+    path = Path(str(row["downloaded_path"]).replace("\\", "/"))
+    return path if path.is_absolute() else img_root / path
+
+
+def _expanded_box(row: pd.Series | dict, image_size: tuple[int, int], pad_frac: float = 0.04):
+    width, height = image_size
+    x1, y1, x2, y2 = (float(row[k]) for k in ["box_x1", "box_y1", "box_x2", "box_y2"])
+    pad = max(x2 - x1, y2 - y1) * pad_frac
+    left = max(0, int(np.floor(x1 - pad)))
+    top = max(0, int(np.floor(y1 - pad)))
+    right = min(width, int(np.ceil(x2 + pad)))
+    bottom = min(height, int(np.ceil(y2 + pad)))
+    if right <= left or bottom <= top:
+        raise ValueError(f"bad crop box for crop_id={row.get('crop_id', row.get('id'))}: {(left, top, right, bottom)}")
+    return left, top, right, bottom
+
+
+def crop_from_image(
+    img: Image.Image,
+    row: pd.Series | dict,
+    pad_frac: float = 0.04,
+    resize: int | tuple[int, int] | None = 224,
+) -> Image.Image:
+    crop = img.crop(_expanded_box(row, img.size, pad_frac=pad_frac))
+    if resize is not None:
+        size = (resize, resize) if isinstance(resize, int) else resize
+        crop = crop.resize(size, Image.Resampling.BICUBIC)
+    return crop
+
+
+def load_crop(
+    row: pd.Series | dict,
+    img_root: Path = IMG_ROOT, # type: ignore
+    pad_frac: float = 0.04,
+    resize: int | tuple[int, int] | None = 224,
+) -> Image.Image:
+    img = load_img_with_orientation(_source_image_path(row, img_root=img_root))
+    return crop_from_image(img, row, pad_frac=pad_frac, resize=resize)
 
 
 

@@ -40,7 +40,7 @@ def local_image_path(record: Mapping[str, Any], img_root: str = IMG_ROOT) -> tup
         file_name = f"{sha1}_{file_name}"
 
     abs_path = os.path.join(img_root, series_dir, file_name)
-    rel_path = os.path.relpath(abs_path, os.path.dirname(IMAGE_DB_PATH))
+    rel_path = os.path.relpath(abs_path, os.path.dirname(IMAGE_DB_PATH)).replace(os.sep, "/")
     return abs_path, rel_path
 
 

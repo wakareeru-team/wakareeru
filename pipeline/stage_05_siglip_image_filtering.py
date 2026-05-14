@@ -7,7 +7,7 @@ from tqdm.auto import tqdm
 import constants
 import utils
 
-os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE" #暂时解决windows anaconda自带一个库导致冲突
+#os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE" #暂时解决windows anaconda自带一个库导致冲突
 
 config = utils.load_pipeline_config()
 PROJECT_ROOT = utils.get_project_root()
