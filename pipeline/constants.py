@@ -204,3 +204,27 @@ LLM_LABEL_DETAIL_PROMPT = """
 # =============== 特殊细化车型标签 ===============
 FINE_GRAINED_SERIES_MATCHING_COLS = ["submodel", "bandai", "special_formation", "special_livery", "operator_en"]
 FINE_GRAINED_SERIES_RULED_COLS  = ["series"] + FINE_GRAINED_SERIES_MATCHING_COLS + ["fine_grained_series"]
+
+
+
+# ================ Crop过滤 SigLIP相关常量 ================
+# 图片过滤相关的常量
+SIGLIP_CROP_FILTER_CANDIDATES = [
+    "an image of a train",
+    "a photo without a train",
+    "a photo of station signs or route maps",
+    "a photo of a statue",
+    "a photo of a decoration board"
+]
+SIGLIP_CROP_PROMPT_TO_LABEL = {
+    "an image of a train": "train",
+    "train": "train",
+    "a photo without a train": "no_train",
+    "no_train": "no_train",
+    "a photo of station signs or route maps": "no_train",
+    "station_signs": "no_train",
+    "a photo of a statue": "no_train",
+    "statue": "no_train",
+    "a photo of a decoration board": "no_train",
+    "decoration_board": "no_train",
+}

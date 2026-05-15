@@ -62,23 +62,17 @@ def crop_from_image(
     img: Image.Image,
     row: pd.Series | dict,
     pad_frac: float = 0.04,
-    resize: int | tuple[int, int] | None = 224,
 ) -> Image.Image:
-    crop = img.crop(_expanded_box(row, img.size, pad_frac=pad_frac))
-    if resize is not None:
-        size = (resize, resize) if isinstance(resize, int) else resize
-        crop = crop.resize(size, Image.Resampling.BICUBIC)
-    return crop
+    return img.crop(_expanded_box(row, img.size, pad_frac=pad_frac))
 
 
 def load_crop(
     row: pd.Series | dict,
     img_root: Path = IMG_ROOT, # type: ignore
     pad_frac: float = 0.04,
-    resize: int | tuple[int, int] | None = 224,
 ) -> Image.Image:
     img = load_img_with_orientation(_source_image_path(row, img_root=img_root))
-    return crop_from_image(img, row, pad_frac=pad_frac, resize=resize)
+    return crop_from_image(img, row, pad_frac=pad_frac)
 
 
 
