@@ -57,11 +57,13 @@ noise_detection:
   # 不会互相被标为噪声，降低误判率。
   # 选项: "series" | "fine_grained_series" | "submodel"
   label_granularity: "fine_grained_series"
+  hf_model_name: "facebook/dinov3-vits16-pretrain-lvd1689m"
   full_series: false
   series_test_scope: ["E231系", "キハ40系", "EF510形", "DD51形", "C57形", "キハ141系","E233系", "E353系", "E657系", "E5系", "E6系", "EF64形", "E7系",'EF81形','E235系','キハ110系',
         '113系','485系','E217系','E257系']
-  hf_model_name: "facebook/dinov3-vits16-pretrain-lvd1689m"
-  batch_size: 16
+  
+  feature_extraction_batch_size: 16
+  linear_head_train_batch_size: 32
 
 # GDINO bbox detection and post-processing configuration
 gdino:
