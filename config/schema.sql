@@ -102,6 +102,8 @@ CREATE TABLE IF NOT EXISTS crops (
     created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
+    noise_score_v1     REAL,-- Small Loss Trick noise score v1 (higher is more likely to be noise)
+
     UNIQUE (image_id, detector_model, nms_iou_threshold, crop_index)
 );
 

@@ -15,6 +15,7 @@ dependencies:
   - requests
   - python-dotenv
   - tqdm
+  - gradio
   - pip:
       - accelerate
       - huggingface-hub
