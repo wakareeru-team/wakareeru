@@ -1,0 +1,152 @@
+# わかれーる Wakareeru
+
+`wakareeru` 是一个面向日本铁路车辆的细粒度图像分类数据集与预处理管线项目。它从日文 Wikipedia 与 Wikimedia Commons 收集车辆系列、分类路径和图片，并通过规则、SigLIP2、LLM 元数据抽取、Grounding-DINO 主体检测与后续噪声筛查，为车辆识别模型准备训练样本。
+
+当前重点是 JR 东日本与 JR 货物车辆，但是可能包含JNR车型同时由其他JR公司继承的车型。；覆盖范围由 `config/pipeline_config.yaml` 中的 `crawler.active_operators` 控制。长期目标是逐步扩展到 JR 本州三社、全 JR 公司，以及私铁车辆。
+
+## 给 Agent 的工作原则
+- 在没有明确要求实现的情形下请不要直接触碰代码，在用户向你询问技术细节或请求纠错时，主动说明用到的library等技术细节。
+- 只实现用户明确要求的任务。这个项目包含很多数据集构建细节，不要主动扩大范围、改标签体系或重构管线。
+- 对于你的工具函数，注意保持职责单一原则，即不要隐含函数名不提到的细节，例如不要在load图片函数中自行transform图片到某些pretrain模型的要求。
+- 对于可视化函数，注意保持参数简洁性和可扩展性，优先使用动态扫描列名的写法，而不是钉死字段名称。
+- 优先遵循现有脚本、配置和数据库 schema；不要为了“更完整”而新增抽象、自动修复逻辑或额外阶段。
+- 如果阶段脚本、数据库字段、配置项或入口命令发生非显然变化，同步更新本文件的相关段落。
+- 不要把一次性运行结果、当前样本数、临时实验结论、具体模型分数等易过期信息写进本文件；这类信息应放在 docs、notebook、review 文件或实验记录里。
+- `data/` 下通常包含生成数据、缓存、图片和 SQLite 数据库。除非用户明确要求，不要清理、重建或覆盖这些文件。
+- 构建pipeline时注意将易修改配置放入config，而把较为固定的常量放入constants.py。在笔记本实验阶段不需要这么做
+
+## 稳定目标与建模方向
+
+- 标签来源：从日文 Wikipedia 车辆列表解析标准化车辆系列。
+- 图片来源：匹配 Wikimedia Commons 分类树并生成图片 manifest。
+- 清洗流程：关键词过滤、SigLIP2 zero-shot 图片过滤、LLM 分类路径元数据抽取、Grounding-DINO 主体 bbox。
+- 训练方向：以 DINO 系列特征为主，结合线性头、监督对比学习或 prototype bank retrieval 做细粒度识别。
+- 增量扩展方向：新增系列尽量通过特征缓存与 prototype bank 检索支持，避免每次都完整重训。
+
+## 仓库结构
+
+```text
+pipeline_entry.py          # 主入口：运行全部阶段、指定阶段或从某阶段继续
+pipeline/                  # 主数据管线；编号 stage 可独立运行
+  stage_01_model_parsing.py
+  stage_02_model_fixing.py
+  stage_03_manifest_crawling.py
+  stage_04_img_crawler.py
+  stage_05_siglip_image_filtering.py
+  stage_06_llm_metadata_labeling.py
+  stage_07_gdino_bbox.py
+  constants.py             # 共享枚举、正则、提示词等
+  utils.py                 # 路径、DB、配置、日志等辅助函数
+config/
+  pipeline_config.yaml     # 路径、模型名、阈值、抓取范围等运行配置
+  manual_series_overrides.csv
+  schema.sql               # 新数据库的基线 schema
+  migrations/              # 既有数据库的增量迁移，按数字顺序执行
+data/                      # 生成数据、SQLite、图片、缓存与 review 输出
+src/crawler/               # 探索性 notebook；不是稳定管线入口
+docs/                      # 项目过程记录与实验说明
+```
+
+## 运行入口
+
+创建环境：
+
+```bash
+conda env create -f environment.yml
+conda activate wakareeru
+pip install -e ".[dev]"
+cp .env.example .env
+```
+
+运行完整管线：
+
+```bash
+python pipeline_entry.py
+```
+
+只运行一个阶段：
+
+```bash
+python pipeline_entry.py --only siglip_filter
+```
+
+从某阶段继续运行：
+
+```bash
+python pipeline_entry.py --from manifest_crawling
+```
+
+开发检查：
+
+```bash
+ruff check .
+pytest
+```
+
+Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
+
+## Pipeline Stages
+
+所有阶段默认读取 `config/pipeline_config.yaml`，主要写入 `data/commons_image_manifest.sqlite` 或 `data/` 下的派生文件。
+
+| Key | Script | 作用 |
+| --- | --- | --- |
+| `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV |
+| `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射 |
+| `manifest_crawling` | `stage_03_manifest_crawling.py` | 查询 Commons 分类树，写入 `categories` 与 `images` |
+| `img_crawling` | `stage_04_img_crawler.py` | 下载图片并更新 `images.download_status` |
+| `siglip_filter` | `stage_05_siglip_image_filtering.py` | 用 SigLIP2 过滤内饰、局部细节等不适合训练的图片 |
+| `llm_labeling` | `stage_06_llm_metadata_labeling.py` | 用 OpenAI API 从分类路径抽取番台、子型号、运营公司等元数据 |
+| `gdino_bbox` | `stage_07_gdino_bbox.py` | 用 Grounding-DINO 检测车辆主体并写入 `crops` |
+
+`pipeline/deprecated_stage_08_siglip_crop_filtering.py` 是弃用阶段，不应作为默认流程的一部分。
+
+## 标签与 Commons 映射
+
+`stage_01` 从日文 Wikipedia 车辆列表解析 `series`、`wiki_title`、`full_name`、`status`、`type`、`subtype`、`operator_jp`、`operator_en` 等字段。
+
+`stage_02` 使用 `config/manual_series_overrides.csv` 处理 Commons 命名差异、系列合并和人工修正。与 Commons 分类名相关的规则集中在 `pipeline/constants.py` 和 stage 脚本中；需要修改时先读现有逻辑，不要只凭文件名字符串硬编码。
+
+`fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/migrations/manual_fine_grained_series.csv` 和 `llm_labeling.fine_grained_rules_path` 配置。
+
+## 数据库概要
+
+新数据库基线 schema 位于 `config/schema.sql`。既有数据库通过 `config/migrations/` 按 `PRAGMA user_version` 增量升级。
+
+关键表：
+
+- `categories`：Commons 分类树节点、父分类、抓取状态与错误信息。
+- `images`：每个 Commons 文件在某个系列/分类下的 manifest 记录，包含标签来源、分类路径、图片元数据、过滤状态、下载状态、LLM 元数据与 `fine_grained_series`。
+- `image_categories`：文件与分类的多对多归属关系。
+- `crops`：Grounding-DINO bbox、检测置信度、裁切状态、噪声分数和人工噪声复核字段。
+
+常用状态字段：
+
+- `images.excluded` / `exclude_reason`：关键词与 SigLIP2 等过滤结果。
+- `images.siglip_processed`：SigLIP2 图片过滤是否已处理。
+- `images.download_status`：`not_started`、`downloaded`、`failed`、`missing_url`。
+- `crops.crop_status`：`pending`、`ok`、`rejected`。
+- `crops.noise_score_v1` 与 `noise_review_*`：Small Loss Trick / 人工复核相关字段。
+
+## 配置要点
+
+- `path.*` 控制数据库、图片目录、CSV、review 输出和 checkpoint 路径。
+- `crawler.active_operators` 控制当前纳入的数据范围。
+- `crawler.manifest_max_depth`、`manifest_max_files_per_category` 控制 Commons 分类递归与每分类文件上限。
+- `image_filtering.*` 控制 SigLIP2 图片过滤。
+- `llm_labeling.*` 控制 OpenAI 元数据抽取与细粒度标签规则。
+- `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
+- `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验。
+
+## 维护边界
+
+本文件应保持为 agent 快速接手项目的稳定地图。适合写：
+
+- 稳定入口、目录职责、阶段职责、关键表和维护原则。
+- 与代码长期一致的命名约定和数据流。
+
+不适合写：
+
+- 某次运行得到的图片数、样本数、准确率、loss、人工 review 进度。
+- 已经修掉的临时 bug 列表。
+- 可能频繁切换的实验模型结论，除非已经成为项目约定。
