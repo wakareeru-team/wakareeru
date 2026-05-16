@@ -135,7 +135,7 @@ python pipeline_entry.py --from manifest_crawling
 - `crawler.manifest_max_depth` 与 `manifest_max_files_per_category` 控制 Commons 分类递归与单分类文件上限。
 - `image_filtering.siglip_model_name` 控制图片过滤模型。
 - `llm_labeling.openai_model_name` 控制 LLM 元数据抽取模型。
-- `fine_grain_series.rules_path` 控制细粒度车型标签规则 CSV。
+- `fine_grain_series.rules_path` 控制细粒度车型标签规则 CSV，默认是 `config/manual_fine_grained_series.csv`。
 - `gdino.model_name`、`box_threshold`、`nms_iou_threshold` 控制主体检测。
 - `noise_detection` 用于后续 DINO 特征缓存与 small-loss trick 噪声检测实验。
 

@@ -25,8 +25,8 @@ STAGES: dict[str, tuple[str, callable]] = { #type: ignore
     "img_crawling":           ("图片爬取",            stage_04.main),
     "siglip_filter":          ("SigLIP2 image filtering", stage_05.main),
     "llm_labeling":          ("LLM 车型信息解析",    stage_06.main),
-    "fine_grain_series":     ("细粒度车型标签构造", stage_08.main),
     "gdino_bbox":     ("Grounding-DINO 主体裁切与后处理", stage_07.main),
+    "fine_grain_series":     ("细粒度车型标签构造", stage_08.main), # 独立出来是因为它直接影响后续的label空间和模型训练，调整后后面的feature分类和模型训练都要重跑
 }
 STAGE_KEYS = list(STAGES.keys())
 

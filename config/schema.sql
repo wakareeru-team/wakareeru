@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS images (
     special_formation   TEXT,
     special_livery      TEXT,
 
-    -- Fine-grained label after manual subtype splitting (stage_06 fine_grained step)
+    -- Fine-grained label after manual subtype splitting (stage_08 fine-grained step)
     fine_grained_series TEXT,              -- e.g. "E233系-2000番台"; NULL → copy series at training time
 
     UNIQUE (series, category, file_title)

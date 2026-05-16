@@ -109,7 +109,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 `stage_02` 使用 `config/manual_series_overrides.csv` 处理 Commons 命名差异、系列合并和人工修正。与 Commons 分类名相关的规则集中在 `pipeline/constants.py` 和 stage 脚本中；需要修改时先读现有逻辑，不要只凭文件名字符串硬编码。
 
-`fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/migrations/manual_fine_grained_series.csv` 和 `fine_grain_series.rules_path` 配置。
+`fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/manual_fine_grained_series.csv` 和 `fine_grain_series.rules_path` 配置。
 
 ## 数据库概要
 
