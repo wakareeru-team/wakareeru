@@ -201,12 +201,6 @@ LLM_LABEL_DETAIL_PROMPT = """
 {"submodel": <车型>, "bandai": <番台>, "operator_en": <运营公司英文名>, "operator_jp": <运营公司日文名>, "special_formation": <特殊编成>, "special_livery": <特殊涂装>}
 """
 
-# =============== 特殊细化车型标签 ===============
-FINE_GRAINED_SERIES_MATCHING_COLS = ["submodel", "bandai", "special_formation", "special_livery", "operator_en"]
-FINE_GRAINED_SERIES_RULED_COLS  = ["series"] + FINE_GRAINED_SERIES_MATCHING_COLS + ["fine_grained_series"]
-
-
-
 # ================ Crop过滤 SigLIP相关常量 ================
 # 图片过滤相关的常量
 SIGLIP_CROP_FILTER_CANDIDATES = [

@@ -35,6 +35,7 @@ pipeline/                  # 主数据管线；编号 stage 可独立运行
   stage_05_siglip_image_filtering.py
   stage_06_llm_metadata_labeling.py
   stage_07_gdino_bbox.py
+  stage_08_fine_grain_series.py
   constants.py             # 共享枚举、正则、提示词等
   utils.py                 # 路径、DB、配置、日志等辅助函数
 config/
@@ -97,6 +98,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 | `img_crawling` | `stage_04_img_crawler.py` | 下载图片并更新 `images.download_status` |
 | `siglip_filter` | `stage_05_siglip_image_filtering.py` | 用 SigLIP2 过滤内饰、局部细节等不适合训练的图片 |
 | `llm_labeling` | `stage_06_llm_metadata_labeling.py` | 用 OpenAI API 从分类路径抽取番台、子型号、运营公司等元数据 |
+| `fine_grain_series` | `stage_08_fine_grain_series.py` | 根据 LLM 元数据和人工规则构造 `fine_grained_series` |
 | `gdino_bbox` | `stage_07_gdino_bbox.py` | 用 Grounding-DINO 检测车辆主体并写入 `crops` |
 
 `pipeline/deprecated_stage_08_siglip_crop_filtering.py` 是弃用阶段，不应作为默认流程的一部分。
@@ -107,7 +109,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 `stage_02` 使用 `config/manual_series_overrides.csv` 处理 Commons 命名差异、系列合并和人工修正。与 Commons 分类名相关的规则集中在 `pipeline/constants.py` 和 stage 脚本中；需要修改时先读现有逻辑，不要只凭文件名字符串硬编码。
 
-`fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/migrations/manual_fine_grained_series.csv` 和 `llm_labeling.fine_grained_rules_path` 配置。
+`fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/migrations/manual_fine_grained_series.csv` 和 `fine_grain_series.rules_path` 配置。
 
 ## 数据库概要
 
@@ -134,7 +136,8 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `crawler.active_operators` 控制当前纳入的数据范围。
 - `crawler.manifest_max_depth`、`manifest_max_files_per_category` 控制 Commons 分类递归与每分类文件上限。
 - `image_filtering.*` 控制 SigLIP2 图片过滤。
-- `llm_labeling.*` 控制 OpenAI 元数据抽取与细粒度标签规则。
+- `llm_labeling.*` 控制 OpenAI 元数据抽取。
+- `fine_grain_series.*` 控制细粒度车型标签规则。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验。
 

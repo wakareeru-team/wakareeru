@@ -8,13 +8,14 @@ PIPELINE_DIR = Path(__file__).resolve().parent / "pipeline"
 if str(PIPELINE_DIR) not in sys.path:
     sys.path.insert(0, str(PIPELINE_DIR))
 
-import pipeline.stage_01_model_parsing as stage_01
-import pipeline.stage_02_model_fixing as stage_02
-import pipeline.stage_03_manifest_crawling as stage_03
-import pipeline.stage_04_img_crawler as stage_04
-import pipeline.stage_05_siglip_image_filtering as stage_05
-import pipeline.stage_06_llm_metadata_labeling as stage_06
-import pipeline.stage_07_gdino_bbox as stage_07
+import pipeline.stage_01_model_parsing as stage_01  # noqa: E402
+import pipeline.stage_02_model_fixing as stage_02  # noqa: E402
+import pipeline.stage_03_manifest_crawling as stage_03  # noqa: E402
+import pipeline.stage_04_img_crawler as stage_04  # noqa: E402
+import pipeline.stage_05_siglip_image_filtering as stage_05  # noqa: E402
+import pipeline.stage_06_llm_metadata_labeling as stage_06  # noqa: E402
+import pipeline.stage_07_gdino_bbox as stage_07  # noqa: E402
+import pipeline.stage_08_fine_grain_series as stage_08  # noqa: E402
 logger = get_logger("run_pipeline")
 
 STAGES: dict[str, tuple[str, callable]] = { #type: ignore
@@ -24,6 +25,7 @@ STAGES: dict[str, tuple[str, callable]] = { #type: ignore
     "img_crawling":           ("图片爬取",            stage_04.main),
     "siglip_filter":          ("SigLIP2 image filtering", stage_05.main),
     "llm_labeling":          ("LLM 车型信息解析",    stage_06.main),
+    "fine_grain_series":     ("细粒度车型标签构造", stage_08.main),
     "gdino_bbox":     ("Grounding-DINO 主体裁切与后处理", stage_07.main),
 }
 STAGE_KEYS = list(STAGES.keys())

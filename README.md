@@ -43,6 +43,7 @@ pipeline/                  # 主数据管线，每个 stage 可独立运行
   stage_05_siglip_image_filtering.py
   stage_06_llm_metadata_labeling.py
   stage_07_gdino_bbox.py
+  stage_08_fine_grain_series.py
   constants.py
   utils.py
 config/
@@ -106,6 +107,7 @@ python pipeline_entry.py --from manifest_crawling
 | `img_crawling` | 异步下载图片并回写下载状态 |
 | `siglip_filter` | 用 SigLIP2 zero-shot 过滤内饰与干扰图片 |
 | `llm_labeling` | 用 OpenAI API 从分类路径抽取结构化元数据 |
+| `fine_grain_series` | 根据人工规则构造 `fine_grained_series` 标签 |
 | `gdino_bbox` | 用 Grounding-DINO 检测车辆主体并写入裁切框 |
 
 ## 数据流
@@ -116,7 +118,8 @@ python pipeline_entry.py --from manifest_crawling
 4. `stage_04_img_crawler.py` 下载图片，保存到 `data/img/`，并更新 SQLite 状态。
 5. `stage_05_siglip_image_filtering.py` 使用 `google/siglip2-base-patch16-512` 判断图片是否适合保留。
 6. `stage_06_llm_metadata_labeling.py` 使用 OpenAI 模型解析分类路径中的番台、运营公司、特殊涂装等信息。
-7. `stage_07_gdino_bbox.py` 使用 `IDEA-Research/grounding-dino-base` 生成车辆主体 bbox 与裁切记录。
+7. `stage_08_fine_grain_series.py` 根据 LLM 元数据和人工规则构造 `fine_grained_series`。
+8. `stage_07_gdino_bbox.py` 使用 `IDEA-Research/grounding-dino-base` 生成车辆主体 bbox 与裁切记录。
 
 主数据库为 `data/commons_image_manifest.sqlite`，关键表包括：
 
@@ -132,6 +135,7 @@ python pipeline_entry.py --from manifest_crawling
 - `crawler.manifest_max_depth` 与 `manifest_max_files_per_category` 控制 Commons 分类递归与单分类文件上限。
 - `image_filtering.siglip_model_name` 控制图片过滤模型。
 - `llm_labeling.openai_model_name` 控制 LLM 元数据抽取模型。
+- `fine_grain_series.rules_path` 控制细粒度车型标签规则 CSV。
 - `gdino.model_name`、`box_threshold`、`nms_iou_threshold` 控制主体检测。
 - `noise_detection` 用于后续 DINO 特征缓存与 small-loss trick 噪声检测实验。
 

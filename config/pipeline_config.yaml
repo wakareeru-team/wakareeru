@@ -49,7 +49,9 @@ llm_labeling:
   batch_size: 5
   max_retries: 3
   openai_model_name: "gpt-5.4-mini"
-  fine_grained_rules_path: "config/migrations/manual_fine_grained_series.csv"
+
+fine_grain_series:
+  rules_path: "config/migrations/manual_fine_grained_series.csv"
 
 # Small Loss Trick噪声检测配置
 noise_detection:
