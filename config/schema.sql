@@ -104,6 +104,12 @@ CREATE TABLE IF NOT EXISTS crops (
 
     noise_score_v1     REAL,-- Small Loss Trick noise score v1 (higher is more likely to be noise)
 
+    -- Manual review state for noise-analysis sampling UI
+    noise_review_label     TEXT, -- 'ok' | 'ambiguous' | 'bad'
+    noise_review_note      TEXT,
+    noise_reviewed_at      TEXT,
+    noise_review_score_col TEXT,
+
     UNIQUE (image_id, detector_model, nms_iou_threshold, crop_index)
 );
 
