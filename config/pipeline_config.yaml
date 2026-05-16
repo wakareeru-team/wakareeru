@@ -67,7 +67,8 @@ noise_detection:
   feature_extraction_batch_size: 16
   linear_head_train_batch_size: 32
   feature_cache_dir: "data/feature_cache"
-  active_feature_cache_file: "demo_dinov3_features_5326crops_23labels.pt"
+  active_feature_cache_file: "latest"
+  latest_feature_cache_file: "latest_feature_cache.txt"
   loss_history_path: "data/demo_loss_history.csv"
   epoch_history_path: "data/demo_epoch_history.csv"
 
