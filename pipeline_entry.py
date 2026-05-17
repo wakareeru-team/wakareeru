@@ -56,12 +56,66 @@ def parse_args():
         choices=STAGE_KEYS,
         help="从指定阶段开始运行到最后",
     )
+    group.add_argument(
+        "--stages",
+        type=str,
+        metavar="STAGES",
+        help=(
+            "按编号运行阶段，支持单个编号、多个编号或范围，"
+            "例如：--stages '3'、--stages '1 2 3'、--stages '1-8 10'"
+        ),
+    )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.stages:
+        try:
+            resolve_stage_number_spec(args.stages)
+        except ValueError as exc:
+            parser.error(str(exc))
+    return args
+
+
+def parse_stage_number(token: str) -> int:
+    try:
+        number = int(token)
+    except ValueError as exc:
+        raise ValueError(f"阶段编号必须是整数：{token!r}") from exc
+    if not 1 <= number <= len(STAGE_KEYS):
+        raise ValueError(f"阶段编号超出范围：{number}，可用范围是 1-{len(STAGE_KEYS)}")
+    return number
+
+
+def resolve_stage_number_spec(spec: str) -> list[str]:
+    """Resolve a stage number spec like ``1-3`` or ``1 2 3``."""
+    stage_numbers: list[int] = []
+    for token in spec.split():
+        token = token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            start_text, end_text = token.split("-", maxsplit=1)
+            start = parse_stage_number(start_text)
+            end = parse_stage_number(end_text)
+            step = 1 if start <= end else -1
+            stage_numbers.extend(range(start, end + step, step))
+        else:
+            stage_numbers.append(parse_stage_number(token))
+
+    seen: set[int] = set()
+    ordered_numbers = []
+    for number in stage_numbers:
+        if number in seen:
+            continue
+        seen.add(number)
+        ordered_numbers.append(number)
+
+    return [STAGE_KEYS[number - 1] for number in ordered_numbers]
 
 
 def resolve_stages(args) -> list[str]:
     """根据参数决定要运行哪些 stage"""
+    if args.stages:
+        return resolve_stage_number_spec(args.stages)
     if args.only:
         return [args.only]
     if args.from_stage:
