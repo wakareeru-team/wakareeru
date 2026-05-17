@@ -16,6 +16,7 @@ dependencies:
   - python-dotenv
   - tqdm
   - gradio
+  - scikit-learn
   - pip:
       - accelerate
       - huggingface-hub

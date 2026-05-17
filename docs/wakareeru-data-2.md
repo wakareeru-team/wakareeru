@@ -579,6 +579,26 @@ for gdino_outputs, input_ids_batch, target_sizes_batch in zip(
 
 对于当前任务，如果只是想先找到车体 bbox 给后续裁图，初始值可以偏召回，例如 `0.15 / 0.25`。如果想看更干净的可视化结果，再提高到 `0.3 / 0.35`。
 
+## 人工噪声复核后的清洗分工
+
+在 DINO 特征缓存和 small-loss 思路之后，开始用 Gradio 对高风险 crop 做人工复核。复核标签不应该只做一个笼统的 `bad`，因为目前观察到的噪声至少可以分成几类性质不同的问题：
+
+- `wrong_label`：crop 本身是清晰、可用的车辆图，但对应的训练标签不对。多见于多车图片、多 crop 图片，或 Commons 分类路径把同一张图挂到多个相关车型下面。
+- `bad_crop`：标签可能没错，但 Grounding DINO 的框不可用，例如只截到局部、遮挡过重、主体偏离，或者画面里没有足够车辆外观信息。
+- `out_of_label_space`：crop 中确实有车辆，但车辆不在当前训练 label space 内。这类样本不应当强行归入现有车型。
+- `ambiguous`：人工也暂时无法稳定判断的样本。
+
+这几个标签的后续处理方式不一样。`wrong_label` 更像是监督标签和视觉内容之间的不一致，因此 DINO 特征训练过程中的 `error_rate`、label 内 loss percentile、tail loss 等指标会比较敏感。把这些指标输入一个简单的 logistic regression，可以作为 `wrong_label` 审核队列的排序器：它适合把疑似错标样本排到前面，让人工优先确认。
+
+但 `bad_crop` 和 `out_of_label_space` 不应该主要依赖 small-loss 来解决。`bad_crop` 的问题发生在裁图质量本身：有些坏 crop 仍然包含足够的车型特征，模型可能照样判对，loss 分布就会和正常样本混在一起。`out_of_label_space` 则是当前标签空间定义与图片内容不一致的问题，它也不一定表现为普通意义上的高 loss。因此这两类更应该回到前面的清洗阶段解决：
+
+- 在 SigLIP2 或其他视觉语义过滤中，更早识别内饰、外部细节、局部特写、非主体车辆画面。
+- 在 Grounding DINO 阶段改进 bbox 选择、NMS、多主体图处理和主体 crop 规则。
+- 为 crop 增加更直接的质量特征，例如 bbox 面积占比、长宽比、主体居中程度、同图 crop 数量、检测 prompt 类型等。
+- 对当前 label space 外的车辆，优先在 manifest/category/metadata 层判断是否应排除、延后，或扩展标签，而不是在训练后用 loss 硬筛。
+
+因此这部分比较值得写入稳定流程的结论是：后训练噪声检测应拆成两条线。第一条是 `wrong_label_score`，用 loss/error-rate 类特征做错标排序；第二条是 `crop_quality_score` 或前置过滤规则，用视觉和 bbox 特征处理坏 crop 与 label space 外样本。不要把所有人工复核标签混成一个二分类噪声分数，否则会把性质不同的问题压到同一个阈值里，反而降低可解释性。
+
 ## Git 提交脉络
 
 今天的实现可以从最近的提交记录中看到比较清晰的演化：
