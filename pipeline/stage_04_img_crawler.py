@@ -17,10 +17,9 @@ import utils
 
 config = utils.load_pipeline_config()
 
-PROJECT_ROOT = utils.get_project_root()
 logger = utils.get_logger("stage_04_img_crawler")
-IMAGE_DB_PATH = utils.join_root_path(config["path"]["db_path"])
-IMG_ROOT = os.path.join(PROJECT_ROOT, "data", "img")
+IMAGE_DB_PATH = utils.join_data_root(config["path"]["db_path"], config=config)
+IMG_ROOT = utils.join_data_root(config["path"]["raw_img_dir"], config=config)
 
 
 def safe_path_component(value: str, max_len: int = 120) -> str:
@@ -31,8 +30,12 @@ def safe_path_component(value: str, max_len: int = 120) -> str:
     return (value or "unnamed")[:max_len]
 
 
-def local_image_path(record: Mapping[str, Any], img_root: str = IMG_ROOT) -> tuple[str, str]:
-    """Return absolute path and DB-relative path for one downloaded image."""
+def local_image_path(
+    record: Mapping[str, Any],
+    img_root: str | os.PathLike = IMG_ROOT,
+    data_root: str | os.PathLike | None = None,
+) -> tuple[str, str]:
+    """Return absolute path and data-root-relative path for one downloaded image."""
     series_dir = safe_path_component(record.get("series"))
     file_name = safe_path_component(record.get("file_title"))
     sha1 = (record.get("sha1") or "")[:6]
@@ -40,7 +43,8 @@ def local_image_path(record: Mapping[str, Any], img_root: str = IMG_ROOT) -> tup
         file_name = f"{sha1}_{file_name}"
 
     abs_path = os.path.join(img_root, series_dir, file_name)
-    rel_path = os.path.relpath(abs_path, os.path.dirname(IMAGE_DB_PATH)).replace(os.sep, "/")
+    data_root = data_root or utils.get_data_root()
+    rel_path = os.path.relpath(abs_path, data_root).replace(os.sep, "/")
     return abs_path, rel_path
 
 
@@ -57,7 +61,8 @@ def _download_retry_sleep(attempt: int, response: httpx.Response | None = None) 
 def download_one_image(
     record: Mapping[str, Any],
     conn: sqlite3.Connection,
-    img_root: str = IMG_ROOT,
+    img_root: str | os.PathLike = IMG_ROOT,
+    data_root: str | os.PathLike | None = None,
     max_retries: int = 3,
 ) -> dict:
     """Download one manifest image, retry transient failures, and update SQLite."""
@@ -67,7 +72,7 @@ def download_one_image(
     if not image_url:
         status, rel_path, error = constants.DOWNLOAD_STATUS_MISSING_URL, None, "image_url is empty"
     else:
-        abs_path, rel_path = local_image_path(record, img_root=img_root)
+        abs_path, rel_path = local_image_path(record, img_root=img_root, data_root=data_root)
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
 
         if os.path.exists(abs_path) and os.path.getsize(abs_path) > 0:
@@ -215,10 +220,13 @@ def _as_bool(value, default: bool = False) -> bool:
 
 def batch_download_manifest_from_db(
     db_path: str = IMAGE_DB_PATH,
+    img_root: str | os.PathLike = IMG_ROOT,
+    data_root: str | os.PathLike | None = None,
     batch_size: int = 500,
     total_limit: int = -1,
     retry_failed: bool = True,
     log_path: str | None = None,
+    max_retries: int = 3,
 ) -> dict[str, int]:
     """Download pending images in fixed-size DB batches with tqdm progress."""
     counts: Counter[str] = Counter()
@@ -247,7 +255,13 @@ def batch_download_manifest_from_db(
                 results = []
                 for record in rows:
                     last_id = max(last_id, int(record["id"]))
-                    result = download_one_image(record, conn,config["crawler"]["download_max_retries"])
+                    result = download_one_image(
+                        record,
+                        conn,
+                        img_root=img_root,
+                        data_root=data_root,
+                        max_retries=max_retries,
+                    )
                     results.append(result)
                     counts[result["status"]] += 1
                     processed += 1
@@ -263,21 +277,27 @@ def batch_download_manifest_from_db(
 
 
 def main(config: dict | None = None):
-    utils.init_db()
-    os.makedirs(IMG_ROOT, exist_ok=True)
     config = config if config is not None else utils.load_pipeline_config()
+    utils.init_db(config=config)
+    img_root = utils.join_data_root(config["path"]["raw_img_dir"], config=config)
+    data_root = utils.get_data_root(config)
+    os.makedirs(img_root, exist_ok=True)
 
     crawler_config = config.get("crawler", {})
     log_path = config['path'].get("img_crawl_log_path")
     if log_path:
-        log_path = utils.join_root_path(log_path)
+        log_path = utils.join_data_root(log_path, config=config)
+    db_path = utils.join_data_root(config["path"]["db_path"], config=config)
 
     result = batch_download_manifest_from_db(
-        db_path=utils.join_root_path(config["path"]["db_path"]),
+        db_path=db_path,
+        img_root=img_root,
+        data_root=data_root,
         batch_size=int(crawler_config["download_batch_size"]),
         total_limit=int(crawler_config["download_total_limit"]),
         retry_failed=_as_bool(crawler_config["download_retry_failed"], default=True),
         log_path=log_path,
+        max_retries=int(crawler_config.get("download_max_retries", 3)),
     )
     logger.info("下载结果: %s", result)
 

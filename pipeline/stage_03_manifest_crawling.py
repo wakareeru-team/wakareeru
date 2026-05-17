@@ -15,11 +15,9 @@ import utils
 
 config = utils.load_pipeline_config()
 
-
-PROJECT_ROOT = utils.get_project_root()
-COMMONS_MODEL_CSV = utils.join_root_path(config['path']['series_commons_path'])
+COMMONS_MODEL_CSV = utils.join_data_root(config['path']['series_commons_path'], config=config)
 logger = utils.get_logger("stage_03_manifest_crawling")
-IMAGE_DB_PATH = utils.join_root_path(config['path']['db_path'])
+IMAGE_DB_PATH = utils.join_data_root(config['path']['db_path'], config=config)
 
 # ========= Helper和一些格式映射 =========
 def utc_now() -> str:
@@ -500,12 +498,13 @@ def crawl_root_manifest_sample(
 
 # ================== pipeline主函数 ==================
 def main(config_override=None):
-    utils.init_db()
     cfg = config_override or config
+    utils.init_db(config=cfg)
     crawler_config = cfg["crawler"]
     logger.info("正在读取 Commons 车型映射 CSV")
 
-    models = load_commons_models(utils.join_root_path(cfg["path"]["series_commons_path"]))
+    db_path = utils.join_data_root(cfg["path"]["db_path"], config=cfg)
+    models = load_commons_models(utils.join_data_root(cfg["path"]["series_commons_path"], config=cfg))
     selected_models, scope_name = select_models_to_crawl(models, crawler_config)
     full_on = _as_bool(crawler_config.get("full_series_crawling"), default=False)
     if full_on:
@@ -529,12 +528,12 @@ def main(config_override=None):
         sample_series=None,
         max_files_per_category=max_files_per_category,
         max_depth=max_depth,
-        db_path=utils.join_root_path(cfg["path"]["db_path"]),
+        db_path=db_path,
         models=selected_models,
     )
     logger.info("本次 manifest 爬取获得 %d 条原始记录", len(sample_manifest))
 
-    filter_result = apply_mime_filter_to_manifest_db(utils.join_root_path(cfg["path"]["db_path"]))
+    filter_result = apply_mime_filter_to_manifest_db(db_path)
     logger.info(
         "MIME 过滤完成：过滤前 %d 条；非图片 %d 条；删除 %d 条；过滤后 %d 条",
         filter_result["before"],

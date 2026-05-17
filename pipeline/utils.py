@@ -26,10 +26,45 @@ def get_project_root():
     raise RuntimeError(f"Project root not found from {current}")
 
 PROJECT_ROOT = get_project_root()
-IMG_ROOT = os.path.join(PROJECT_ROOT, load_pipeline_config()['path']['raw_img_dir'])
 
-def join_root_path(relative_path: str) -> str:
-    return os.path.join(PROJECT_ROOT, relative_path)
+def join_root_path(relative_path: str | Path) -> str:
+    """Backward-compatible alias for project-root paths."""
+    return str(join_project_root(relative_path))
+
+
+def join_project_root(path: str | Path) -> Path:
+    """Join code/config paths to the repository root."""
+    path = Path(path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+def get_data_root(config: dict | None = None) -> Path:
+    """Return the generated-data root from config.
+
+    If path.in_project_root is true, data_root is resolved under PROJECT_ROOT.
+    If false, data_root must be an absolute path for external volume mounts.
+    """
+    config = config or load_pipeline_config()
+    path_config = config.get("path", {})
+    data_root = Path(path_config.get("data_root", "data")).expanduser()
+    in_project_root = path_config.get("in_project_root", True)
+
+    if in_project_root:
+        return data_root if data_root.is_absolute() else PROJECT_ROOT / data_root
+    if not data_root.is_absolute():
+        raise ValueError("path.data_root must be absolute when path.in_project_root is false")
+    return data_root
+
+
+def join_data_root(path: str | Path, config: dict | None = None) -> Path:
+    """Join generated-data paths to data_root."""
+    path = Path(path).expanduser()
+    if not path.is_absolute():
+        path = get_data_root(config) / path
+    return path
+
 
 # ================ Image Processing Utils ================
 def load_img_with_orientation(path):
@@ -40,9 +75,17 @@ def load_img_with_orientation(path):
     return img
 
 
-def _source_image_path(row: pd.Series | dict, img_root: Path = IMG_ROOT) -> Path: # type: ignore
+def _source_image_path(
+    row: pd.Series | dict,
+    img_root: Path | None = None,
+    config: dict | None = None,
+) -> Path:
     path = Path(str(row["downloaded_path"]).replace("\\", "/"))
-    return path if path.is_absolute() else img_root / path
+    if path.is_absolute():
+        return path
+    if img_root is not None:
+        return Path(img_root) / path
+    return join_data_root(path, config=config)
 
 
 def _expanded_box(row: pd.Series | dict, image_size: tuple[int, int], pad_frac: float = 0.04):
@@ -68,10 +111,13 @@ def crop_from_image(
 
 def load_crop(
     row: pd.Series | dict,
-    img_root: Path = IMG_ROOT, # type: ignore
+    img_root: Path | None = None,
+    config: dict | None = None,
     pad_frac: float = 0.04,
 ) -> Image.Image:
-    img = load_img_with_orientation(_source_image_path(row, img_root=img_root))
+    img = load_img_with_orientation(
+        _source_image_path(row, img_root=img_root, config=config)
+    )
     return crop_from_image(img, row, pad_frac=pad_frac)
 
 
@@ -119,11 +165,17 @@ def init_db(
     db_path: str | Path | None = None,
     schema_path: str | Path | None = None,
     migrations_dir: str | Path | None = None,
+    config: dict | None = None,
 ) -> None:
     """Initialize the SQLite database from config/schema.sql without dropping data."""
-    resolved_db_path = resolve_db_path(db_path)
-    schema_path = resolve_project_path(schema_path or PROJECT_ROOT / "config" / "schema.sql")
-    migrations_dir = resolve_project_path(migrations_dir or PROJECT_ROOT / "config" / "migrations")
+    resolved_db_path = db_path if db_path == ":memory:" else join_data_root(
+        db_path or (config or load_pipeline_config())["path"]["db_path"],
+        config=config,
+    )
+    if resolved_db_path != ":memory:":
+        Path(resolved_db_path).parent.mkdir(parents=True, exist_ok=True)
+    schema_path = join_project_root(schema_path or "config/schema.sql")
+    migrations_dir = join_project_root(migrations_dir or "config/migrations")
 
     schema_sql = schema_path.read_text(encoding="utf-8")
 
@@ -142,31 +194,14 @@ def init_db(
         conn.close()
 
 
-def connect_db(db_path: str | Path | None = None) -> sqlite3.Connection:
+def connect_db(db_path: str | Path | None = None, config: dict | None = None) -> sqlite3.Connection:
     """Open a SQLite connection for callers that need to own DB lifecycle."""
-    conn = sqlite3.connect(resolve_db_path(db_path))
+    if db_path is None:
+        db_path = (config or load_pipeline_config())["path"]["db_path"]
+    resolved_db_path = db_path if db_path == ":memory:" else join_data_root(db_path, config=config)
+    conn = sqlite3.connect(resolved_db_path)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
-
-
-def resolve_db_path(db_path: str | Path | None = None) -> str | Path:
-    if db_path is None:
-        config = load_pipeline_config()
-        db_path = config["path"]["db_path"]
-
-    if db_path == ":memory:":
-        return db_path
-
-    resolved_db_path = resolve_project_path(db_path)
-    resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
-    return resolved_db_path
-
-
-def resolve_project_path(path: str | Path) -> Path:
-    path = Path(path)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    return path
 
 
 def migration_version(path: Path) -> int:

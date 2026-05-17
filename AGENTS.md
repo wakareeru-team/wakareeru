@@ -88,7 +88,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 ## Pipeline Stages
 
-所有阶段默认读取 `config/pipeline_config.yaml`，主要写入 `data/commons_image_manifest.sqlite` 或 `data/` 下的派生文件。
+所有阶段默认读取 `config/pipeline_config.yaml`。代码、配置和规则文件始终相对项目根目录解析；数据库、图片、缓存、review 输出等生成数据相对 `path.data_root` 解析。默认主要写入项目内 `data/commons_image_manifest.sqlite` 或 `data/` 下的派生文件。
 
 | Key | Script | 作用 |
 | --- | --- | --- |
@@ -127,12 +127,14 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `images.excluded` / `exclude_reason`：关键词与 SigLIP2 等过滤结果。
 - `images.siglip_processed`：SigLIP2 图片过滤是否已处理。
 - `images.download_status`：`not_started`、`downloaded`、`failed`、`missing_url`。
+- `images.downloaded_path`：相对 `path.data_root` 的图片路径，通常形如 `img/<series>/<file>`。
 - `crops.crop_status`：`pending`、`ok`、`rejected`。
 - `crops.noise_score_v1` 与 `noise_review_*`：Small Loss Trick / 人工复核相关字段。
 
 ## 配置要点
 
-- `path.*` 控制数据库、图片目录、CSV、review 输出和 checkpoint 路径。
+- `path.in_project_root` 与 `path.data_root` 控制生成数据根目录；`in_project_root: true` 时 `data_root` 相对项目根目录解析，`false` 时 `data_root` 必须是绝对路径，适合 RunPod volume 挂载。
+- `path.db_path`、`path.raw_img_dir`、`path.cache_dir`、CSV、review 输出和 checkpoint 路径相对 `path.data_root` 解析；`manual_series_overrides_path`、`fine_grain_series.rules_path` 等代码/配置文件仍相对项目根目录解析。
 - `crawler.active_operators` 控制当前纳入的数据范围。
 - `crawler.manifest_max_depth`、`manifest_max_files_per_category` 控制 Commons 分类递归与每分类文件上限。
 - `image_filtering.*` 控制 SigLIP2 图片过滤。

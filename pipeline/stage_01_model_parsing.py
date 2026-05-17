@@ -2,12 +2,9 @@ import httpx
 import re
 import json
 import pandas as pd
-import os
 import utils
 import asyncio
 import constants
-current_dir = os.getcwd()
-PROJECT_ROOT = utils.get_project_root()
 logger = utils.get_logger("stage_01_model_parsing")
 
 
@@ -160,8 +157,8 @@ def _row_quality(row: pd.Series) -> tuple:
 def main(config = None):
     
     # === 初始化 ===
-    utils.init_db()
     config = config or utils.load_pipeline_config()
+    utils.init_db(config=config)
     logger = utils.get_logger("stage_01_model_parsing")
     active_operatos = config['crawler']['active_operators']
     
@@ -259,9 +256,10 @@ def main(config = None):
     logger.info("正在将 operator 列表进行 JSON 序列化")
     for col in ["operator_page_title", "operator_jp", "operator_en"]:
         export_df[col] = export_df[col].apply(lambda v: json.dumps(v, ensure_ascii=False))
-    export_df.to_csv(os.path.join(PROJECT_ROOT, "data", "jr_east_freight_series.csv"), index=False, encoding="utf-8")
-    export_df.to_csv(config['path']['series_list_path'], index=False, encoding="utf-8")
-    logger.info(f"车型列表已保存到 {config['path']['series_list_path']},共 {len(export_df)} 条记录")
+    series_list_path = utils.join_data_root(config["path"]["series_list_path"], config=config)
+    series_list_path.parent.mkdir(parents=True, exist_ok=True)
+    export_df.to_csv(series_list_path, index=False, encoding="utf-8")
+    logger.info(f"车型列表已保存到 {series_list_path},共 {len(export_df)} 条记录")
     
     
     

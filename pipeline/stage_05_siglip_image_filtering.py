@@ -10,9 +10,8 @@ import utils
 #os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE" #暂时解决windows anaconda自带一个库导致冲突
 
 config = utils.load_pipeline_config()
-PROJECT_ROOT = utils.get_project_root()
 logger = utils.get_logger("stage_05_siglip_image_filtering")
-IMAGE_DB_PATH = utils.join_root_path(config["path"]["db_path"])
+IMAGE_DB_PATH = utils.join_data_root(config["path"]["db_path"], config=config)
 
 SIGLIP_VIEW_CANDIDATES = constants.SIGLIP_VIEW_CANDIDATES
 SIGLIP_PROMPT_TO_LABEL = constants.SIGLIP_PROMPT_TO_LABEL
@@ -84,8 +83,8 @@ def _fetch_pending_image_batch(
     return [dict(row) for row in rows]
 
 
-def _image_abs_path(downloaded_path: str) -> str:
-    return utils.join_root_path(os.path.join("data", downloaded_path))
+def _image_abs_path(downloaded_path: str, config: dict | None = None) -> str:
+    return str(utils.join_data_root(str(downloaded_path).replace("\\", "/"), config=config))
 
 
 def _updates_from_outputs(rows: list[dict], outputs: list, threshold: float) -> tuple[list[tuple], list[dict]]:
@@ -132,6 +131,7 @@ def _append_siglip_log(log_path: str, rows: list[dict]) -> None:
 def batch_siglip_classification(
     image_classifier,
     db_path: str = IMAGE_DB_PATH,
+    config: dict | None = None,
     db_load_batch_size: int = 100,
     total_limit: int = -1,
     include_excluded: bool = False,
@@ -163,7 +163,10 @@ def batch_siglip_classification(
                     break
 
                 last_id = rows[-1]["id"]
-                existing_rows = [row for row in rows if os.path.exists(_image_abs_path(row["downloaded_path"]))]
+                existing_rows = [
+                    row for row in rows
+                    if os.path.exists(_image_abs_path(row["downloaded_path"], config=config))
+                ]
                 existing_ids = {row["id"] for row in existing_rows}
                 missing_rows = [row for row in rows if row["id"] not in existing_ids]
 
@@ -173,7 +176,7 @@ def batch_siglip_classification(
                     counts["missing_file"] += len(missing_rows)
 
                 if existing_rows:
-                    paths = [_image_abs_path(row["downloaded_path"]) for row in existing_rows]
+                    paths = [_image_abs_path(row["downloaded_path"], config=config) for row in existing_rows]
                     outputs = image_classifier(paths, SIGLIP_VIEW_CANDIDATES)
                     update_rows, log_rows = _updates_from_outputs(existing_rows, outputs, threshold)
                     conn.executemany(
@@ -208,7 +211,7 @@ def main(config_override: dict | None = None):
 
     load_dotenv(override=True)
     cfg = config_override or config
-    utils.init_db()
+    utils.init_db(config=cfg)
 
     token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
     if token:
@@ -235,11 +238,13 @@ def main(config_override: dict | None = None):
 
     log_path = image_filtering_config.get("siglip_log_path")
     if log_path:
-        log_path = utils.join_root_path(log_path)
+        log_path = utils.join_data_root(log_path, config=cfg)
+    db_path = utils.join_data_root(cfg["path"]["db_path"], config=cfg)
 
     result = batch_siglip_classification(
         image_classifier=image_classifier,
-        db_path=utils.join_root_path(cfg["path"]["db_path"]),
+        db_path=db_path,
+        config=cfg,
         db_load_batch_size=int(image_filtering_config.get("siglip_db_load_batch_size", 100)),
         total_limit=int(image_filtering_config.get("siglip_total_limit", -1)),
         include_excluded=_as_bool(image_filtering_config.get("siglip_include_excluded"), default=False),

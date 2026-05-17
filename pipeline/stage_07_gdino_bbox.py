@@ -15,10 +15,8 @@ import utils
 
 config = utils.load_pipeline_config()
 
-PROJECT_ROOT = utils.get_project_root()
 logger = utils.get_logger("stage_07_gdino_bbox")
-IMAGE_DB_PATH = utils.join_root_path(config["path"]["db_path"])
-DATA_ROOT = os.path.join(PROJECT_ROOT, "data")
+IMAGE_DB_PATH = utils.join_data_root(config["path"]["db_path"], config=config)
 
 
 def detach_to_cpu(value):
@@ -165,9 +163,10 @@ def main(config: dict | None = None):
     if not config:
         config = utils.load_pipeline_config()
     login(token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
-    utils.init_db()
+    utils.init_db(config=config)
 
     gdino_cfg = config["gdino"]
+    db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     model_id = gdino_cfg["model_name"]
     box_threshold = gdino_cfg["box_threshold"]
     text_threshold = gdino_cfg["text_threshold"]
@@ -189,7 +188,7 @@ def main(config: dict | None = None):
     model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(device)
     model.eval()
 
-    with sqlite3.connect(IMAGE_DB_PATH) as conn:
+    with sqlite3.connect(db_path) as conn:
         full_df = pd.read_sql_query(
             """
             SELECT id, downloaded_path, series, power_type
@@ -202,10 +201,12 @@ def main(config: dict | None = None):
         )
 
     full_df["gdino_labels"] = full_df["power_type"].apply(gdino_text_label_for_power_type)
-    full_df["abs_path"] = full_df["downloaded_path"].apply(lambda x: os.path.join(DATA_ROOT, x))
+    full_df["abs_path"] = full_df["downloaded_path"].apply(
+        lambda x: str(utils.join_data_root(str(x).replace("\\", "/"), config=config))
+    )
     logger.info("待处理图片数：%d", len(full_df))
 
-    with sqlite3.connect(IMAGE_DB_PATH) as conn:
+    with sqlite3.connect(db_path) as conn:
         with tqdm(total=len(full_df), desc="GDINO 推理", unit="img") as pbar:
             for outer_start in range(0, len(full_df), outer_batch_size):
                 outer_df = full_df.iloc[outer_start : outer_start + outer_batch_size]

@@ -11,8 +11,6 @@ import pandas as pd
 import constants
 import utils
 
-
-PROJECT_ROOT = utils.get_project_root()
 logger = utils.get_logger("stage_02_model_fixing")
 
 MANUAL_ACTIONS = constants.MANUAL_ACTIONS
@@ -82,7 +80,7 @@ def load_manual_overrides(path: str | os.PathLike | None) -> dict[tuple[str, str
     if not path:
         return {}
 
-    path = utils.join_root_path(path)
+    path = utils.join_project_root(path)
     if not os.path.exists(path):
         logger.warning("未找到人工修正文件：%s", path)
         return {}
@@ -516,13 +514,16 @@ def find_commons_root(
 
 
 def main(config=None):
-    utils.init_db()
     config = config or utils.load_pipeline_config()
+    utils.init_db(config=config)
 
     manual_overrides = load_manual_overrides(config["path"].get("manual_series_overrides_path"))
-    series_commons_path = utils.join_root_path(config["path"]["series_commons_path"])
+    series_commons_path = utils.join_data_root(config["path"]["series_commons_path"], config=config)
     commons_cache = _load_commons_cache(series_commons_path)
-    all_model = pd.read_csv(utils.join_root_path(config["path"]["series_list_path"]), encoding="utf-8")
+    all_model = pd.read_csv(
+        utils.join_data_root(config["path"]["series_list_path"], config=config),
+        encoding="utf-8",
+    )
     for col in ["operator_page_title", "operator_jp", "operator_en"]:
         all_model[col] = all_model[col].apply(parse_json_list)
 
@@ -587,7 +588,7 @@ def main(config=None):
     all_model.to_csv(series_commons_path, index=False, encoding="utf-8")
     logger.info("Commons 车型映射已保存到 %s", config["path"]["series_commons_path"])
 
-    review_path = utils.join_root_path(config["path"]["commons_review_path"])
+    review_path = utils.join_data_root(config["path"]["commons_review_path"], config=config)
     os.makedirs(os.path.dirname(review_path), exist_ok=True)
     review_df = all_model[all_model["needs_review"] == True]
     review_df.to_csv(review_path, index=False, encoding="utf-8")

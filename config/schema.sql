@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS images (
 
     -- Download state
     download_status     TEXT NOT NULL DEFAULT 'not_started', -- 'not_started' | 'downloaded' | 'failed' | 'missing_url'
-    downloaded_path     TEXT,               -- relative to data/ dir
+    downloaded_path     TEXT,               -- relative to path.data_root
     fetched_at          TEXT NOT NULL,
 
     -- LLM-extracted metadata from category_path (img_filter_v2 step 3)

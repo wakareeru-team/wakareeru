@@ -1,13 +1,18 @@
 # Pipeline configuration file.
 path:
-  db_path: "data/commons_image_manifest.sqlite"
-  raw_img_dir: "data/img"
-  cache_dir: "data/cache"
-  series_list_path: 'data/jr_east_freight_series.csv'
-  series_commons_path: 'data/jr_east_freight_series_wiki_commons.csv'
-  commons_review_path: 'data/review/commons_root_review.csv'
+  # If true, data_root is resolved under the repository root.
+  # If false, data_root must be an absolute path, e.g. a mounted volume on RunPod.
+  in_project_root: true
+  data_root: "data"
+  db_path: "commons_image_manifest.sqlite"
+  raw_img_dir: "img"
+  cache_dir: "cache"
+  series_list_path: 'jr_east_freight_series.csv'
+  series_commons_path: 'jr_east_freight_series_wiki_commons.csv'
+  commons_review_path: 'review/commons_root_review.csv'
   manual_series_overrides_path: 'config/manual_series_overrides.csv'
-  img_crawl_log_path: 'data/img_crawl_checkpoint.csv'
+  img_crawl_log_path: 'img_crawl_checkpoint.csv'
+  llm_category_details_path: 'llm_category_details.csv'
 
 
 # Crawler configuration
@@ -66,11 +71,11 @@ noise_detection:
   
   feature_extraction_batch_size: 16
   linear_head_train_batch_size: 32
-  feature_cache_dir: "data/feature_cache"
+  feature_cache_dir: "feature_cache"
   active_feature_cache_file: "latest"
   latest_feature_cache_file: "latest_feature_cache.txt"
-  loss_history_path: "data/demo_loss_history.csv"
-  epoch_history_path: "data/demo_epoch_history.csv"
+  loss_history_path: "demo_loss_history.csv"
+  epoch_history_path: "demo_epoch_history.csv"
 
 # GDINO bbox detection and post-processing configuration
 gdino:
@@ -89,6 +94,6 @@ crop_filtering:
   siglip_total_limit: -1
   siglip_include_excluded: false
   siglip_threshold: 0.0
-  siglip_log_path: "data/siglip_crop_checkpoint.csv"
+  siglip_log_path: "siglip_crop_checkpoint.csv"
   crop_pad_frac: 0.04
   crop_resize: null

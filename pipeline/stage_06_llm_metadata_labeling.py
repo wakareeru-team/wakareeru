@@ -9,7 +9,6 @@ import time
 from openai import OpenAI
 
 config = utils.load_pipeline_config()
-PROJECT_ROOT = utils.get_project_root()
 logger = utils.get_logger("stage_06_llm_metadata_labeling")
 
 BATCH_SIZE_DETAILS = 5
@@ -63,12 +62,13 @@ def request_details_batch(openai_client, openai_model_name, system_prompt, batch
 def main(config: dict | None = None):
     if config is None:
         config = utils.load_pipeline_config()
+    utils.init_db(config=config)
     OPENAI_MODEL_NAME = config["llm_labeling"]["openai_model_name"]
     if os.environ.get("OPENAI_API_KEY") is None:
         logger.error("没有设置 OPENAI_API_KEY 环境变量，无法继续执行 LLM 相关的步骤。请设置环境变量后重试。")
         return
     
-    db_path = utils.join_root_path(config["path"]["db_path"])
+    db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     openai_client = OpenAI()
 
     with sqlite3.connect(db_path) as conn:
@@ -98,13 +98,18 @@ def main(config: dict | None = None):
 
     llm_details = pd.DataFrame(llm_details_rows)
     
-    llm_details.to_csv(os.path.join(PROJECT_ROOT, "data", "llm_category_details.csv"), index=False)
+    details_path = utils.join_data_root(
+        config["path"].get("llm_category_details_path", "llm_category_details.csv"),
+        config=config,
+    )
+    details_path.parent.mkdir(parents=True, exist_ok=True)
+    llm_details.to_csv(details_path, index=False)
 
     
         # 将 category details 回写到 images 表。幂等。
     DETAIL_COLS = ["submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery"]
 
-    llm_details = pd.read_csv(os.path.join(PROJECT_ROOT, "data", "llm_category_details.csv"), dtype={"bandai": str})
+    llm_details = pd.read_csv(details_path, dtype={"bandai": str})
 
     def sql_null(v):
         """Coerce empty/sentinel strings to None so SQLite stores NULL."""

@@ -113,8 +113,8 @@ def main(config: dict | None = None) -> None:
     if config is None:
         config = utils.load_pipeline_config()
 
-    db_path = utils.join_root_path(config["path"]["db_path"])
-    rules_path = utils.join_root_path(
+    db_path = utils.join_data_root(config["path"]["db_path"], config=config)
+    rules_path = utils.join_project_root(
         config.get("fine_grain_series", {}).get("rules_path", DEFAULT_RULES_PATH)
     )
 

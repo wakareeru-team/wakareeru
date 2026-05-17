@@ -13,10 +13,8 @@ import utils
 #os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE" #暂时解决windows anaconda自带一个库导致冲突
 
 config = utils.load_pipeline_config()
-PROJECT_ROOT = utils.get_project_root()
 logger = utils.get_logger("stage_08_siglip_crop_filtering")
-IMAGE_DB_PATH = utils.join_root_path(config["path"]["db_path"])
-DATA_ROOT = Path(PROJECT_ROOT) / "data"
+IMAGE_DB_PATH = utils.join_data_root(config["path"]["db_path"], config=config)
 SIGLIP_CROP_VIEW_CANDIDATES = constants.SIGLIP_CROP_FILTER_CANDIDATES
 SIGLIP_PROMPT_TO_LABEL = constants.SIGLIP_CROP_PROMPT_TO_LABEL
 KEEP_LABELS = {"train"}
@@ -101,10 +99,8 @@ def _fetch_pending_crop_batch(
     return [dict(row) for row in rows]
 
 
-def _image_abs_path(downloaded_path: str) -> Path:
-    normalized = str(downloaded_path).replace("\\", "/")
-    path = Path(normalized)
-    return path if path.is_absolute() else DATA_ROOT / path
+def _image_abs_path(downloaded_path: str, config: dict | None = None) -> Path:
+    return utils.join_data_root(str(downloaded_path).replace("\\", "/"), config=config)
 
 
 def _resize_crop_for_pipeline(
@@ -119,6 +115,7 @@ def _resize_crop_for_pipeline(
 
 def _load_existing_crops(
     rows: list[dict],
+    config: dict | None,
     pad_frac: float,
     resize: int | tuple[int, int] | None,
 ) -> tuple[list[dict], list, list[dict]]:
@@ -127,7 +124,7 @@ def _load_existing_crops(
     crops = []
 
     for row in rows:
-        image_path = _image_abs_path(row["downloaded_path"])
+        image_path = _image_abs_path(row["downloaded_path"], config=config)
         if not image_path.exists():
             logger.warning(
                 "Missing source image, skipping: crop_id=%d image_id=%d %s",
@@ -138,7 +135,7 @@ def _load_existing_crops(
             missing_rows.append(row)
             continue
 
-        crop = utils.load_crop(row, img_root=DATA_ROOT, pad_frac=pad_frac)
+        crop = utils.load_crop(row, config=config, pad_frac=pad_frac)
         crop = _resize_crop_for_pipeline(crop, resize=resize)
         existing_rows.append(row)
         crops.append(crop)
@@ -234,6 +231,7 @@ def _append_siglip_log(log_path: str, rows: list[dict]) -> None:
 def batch_siglip_crop_classification(
     image_classifier,
     db_path: str = IMAGE_DB_PATH,
+    config: dict | None = None,
     db_load_batch_size: int = 100,
     siglip_batch_size: int = 16,
     total_limit: int = -1,
@@ -268,7 +266,12 @@ def batch_siglip_crop_classification(
                     break
 
                 last_id = rows[-1]["crop_id"]
-                existing_rows, crops, missing_rows = _load_existing_crops(rows, pad_frac=pad_frac, resize=resize)
+                existing_rows, crops, missing_rows = _load_existing_crops(
+                    rows,
+                    config=config,
+                    pad_frac=pad_frac,
+                    resize=resize,
+                )
 
                 if missing_rows:
                     update_rows, log_rows = _updates_from_missing(missing_rows)
@@ -337,7 +340,7 @@ def main(config_override: dict | None = None):
 
     load_dotenv(override=True)
     cfg = config_override or config
-    utils.init_db()
+    utils.init_db(config=cfg)
 
     token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
     if token:
@@ -366,11 +369,13 @@ def main(config_override: dict | None = None):
 
     log_path = crop_config.get("siglip_log_path")
     if log_path:
-        log_path = utils.join_root_path(log_path)
+        log_path = utils.join_data_root(log_path, config=cfg)
+    db_path = utils.join_data_root(cfg["path"]["db_path"], config=cfg)
 
     result = batch_siglip_crop_classification(
         image_classifier=image_classifier,
-        db_path=utils.join_root_path(cfg["path"]["db_path"]),
+        db_path=db_path,
+        config=cfg,
         db_load_batch_size=int(crop_config.get("siglip_db_load_batch_size", 100)),
         siglip_batch_size=int(crop_config.get("siglip_batch_size", 16)),
         total_limit=int(crop_config.get("siglip_total_limit", -1)),
