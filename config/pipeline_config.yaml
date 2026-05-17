@@ -55,27 +55,6 @@ llm_labeling:
   max_retries: 3
   openai_model_name: "gpt-5.4-mini"
 
-fine_grain_series:
-  rules_path: "config/manual_fine_grained_series.csv"
-
-# Small Loss Trick噪声检测配置
-noise_detection:
-  # 用于noise detection训练的分类粒度。粒度越细，同series内视觉差异大的子型号
-  # 不会互相被标为噪声，降低误判率。
-  # 选项: "series" | "fine_grained_series" | "submodel"
-  label_granularity: "fine_grained_series"
-  hf_model_name: "facebook/dinov3-vits16-pretrain-lvd1689m"
-  full_series: false
-  series_test_scope: ["E231系", "キハ40系", "EF510形", "DD51形", "C57形", "キハ141系","E233系", "E353系", "E657系", "E5系", "E6系", "EF64形", "E7系",'EF81形','E235系','キハ110系',
-        '113系','485系','E217系','E257系']
-  
-  feature_extraction_batch_size: 16
-  linear_head_train_batch_size: 32
-  feature_cache_dir: "feature_cache"
-  active_feature_cache_file: "latest"
-  latest_feature_cache_file: "latest_feature_cache.txt"
-  loss_history_path: "demo_loss_history.csv"
-  epoch_history_path: "demo_epoch_history.csv"
 
 # GDINO bbox detection and post-processing configuration
 gdino:
@@ -97,3 +76,39 @@ crop_filtering:
   siglip_log_path: "siglip_crop_checkpoint.csv"
   crop_pad_frac: 0.04
   crop_resize: null
+
+fine_grain_series:
+  rules_path: "config/manual_fine_grained_series.csv"
+
+# Small Loss Trick噪声检测配置
+noise_detection:
+  # 用于noise detection训练的分类粒度。粒度越细，同series内视觉差异大的子型号
+  # 不会互相被标为噪声，降低误判率。
+  # 选项: "series" | "fine_grained_series" | "submodel"
+  label_granularity: "fine_grained_series"
+  hf_model_name: "facebook/dinov3-vits16-pretrain-lvd1689m"
+  full_series: false
+  series_test_scope: ["E231系", "キハ40系", "EF510形", "DD51形", "C57形", "キハ141系","E233系", "E353系", "E657系", "E5系", "E6系", "EF64形", "E7系",'EF81形','E235系','キハ110系',
+        '113系','485系','E217系','E257系']
+  
+
+  crop_pad_frac: 0.04
+
+  feature_extraction_batch_size: 16
+  extration_workers: 4
+  linear_head_train_batch_size: 32
+  feature_cache_dir: "feature_cache"
+  active_feature_cache_file: "latest"
+  latest_feature_cache_file: "latest_feature_cache.txt"
+
+loss_noise_tracking:
+  embedding_feature_dim: 384
+  learning_rate_high: 1e-3
+  learning_rate_low: 1e-4
+  lr_cycle_period: 10
+  num_epochs: 30
+  weight_decay: 1e-4
+  loss_history_path: "demo_loss_history.csv"
+  epoch_history_path: "demo_epoch_history.csv"
+  model_dir: "model"
+  model_checkpoint_prefix: "DINO_CLS_HEAD"

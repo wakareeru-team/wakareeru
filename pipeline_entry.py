@@ -16,6 +16,8 @@ import pipeline.stage_05_siglip_image_filtering as stage_05  # noqa: E402
 import pipeline.stage_06_llm_metadata_labeling as stage_06  # noqa: E402
 import pipeline.stage_07_gdino_bbox as stage_07  # noqa: E402
 import pipeline.stage_08_fine_grain_series as stage_08  # noqa: E402
+import pipeline.stage_09_DINOv3_feature_extraction as stage_09  # noqa: E402
+import pipeline.stage_10_train_loss_tracking as stage_10  # noqa: E402
 logger = get_logger("run_pipeline")
 
 STAGES: dict[str, tuple[str, callable]] = { #type: ignore
@@ -27,6 +29,8 @@ STAGES: dict[str, tuple[str, callable]] = { #type: ignore
     "llm_labeling":          ("LLM 车型信息解析",    stage_06.main),
     "gdino_bbox":     ("Grounding-DINO 主体裁切与后处理", stage_07.main),
     "fine_grain_series":     ("细粒度车型标签构造", stage_08.main), # 独立出来是因为它直接影响后续的label空间和模型训练，调整后后面的feature分类和模型训练都要重跑
+    "feature_extraction":    ("DINOv3 特征提取",     stage_09.main),
+    "loss_tracking":         ("训练与损失跟踪",     stage_10.main),
 }
 STAGE_KEYS = list(STAGES.keys())
 
