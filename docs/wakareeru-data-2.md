@@ -599,6 +599,38 @@ for gdino_outputs, input_ids_batch, target_sizes_batch in zip(
 
 因此这部分比较值得写入稳定流程的结论是：后训练噪声检测应拆成两条线。第一条是 `wrong_label_score`，用 loss/error-rate 类特征做错标排序；第二条是 `crop_quality_score` 或前置过滤规则，用视觉和 bbox 特征处理坏 crop 与 label space 外样本。不要把所有人工复核标签混成一个二分类噪声分数，否则会把性质不同的问题压到同一个阈值里，反而降低可解释性。
 
+### 未来走向：多轮主动清洗
+
+人工复核不可能随数据规模线性增长，所以后续更合理的方向不是全量人工检查，而是把人工标注样本用于校准一个保守的错标筛查器。基本循环可以是：
+
+```text
+当前可用 crop 集
+        |
+        v
+训练线性头，记录每个 crop 的 loss / error-rate 特征
+        |
+        v
+人工复核少量高风险样本，得到 ok / wrong_label 等标签
+        |
+        v
+用人工标签拟合 wrong_label logistic regression
+        |
+        v
+在 reviewed set 上用约束目标选择 threshold
+        |
+        v
+保守排除高置信 wrong_label
+        |
+        v
+重新训练线性头并进入下一轮
+```
+
+这里的 threshold 不应该只用固定的 `0.5`，而应当按清洗目标优化。例如更适合数据集构建的目标是：在 `ok` 的误伤率低于某个上限时，尽可能提高 `wrong_label` 的召回。这样每轮只排除高置信错标，减少误杀干净样本；同时保留阈值附近的样本作为下一轮人工抽检对象。
+
+这个循环的意义不是让模型“自动理解所有噪声”，而是先把明显错标移出训练集。随着训练集变干净，线性头对正常样本的预测会更稳定，剩余错标样本在 loss / error-rate 上会更突出，下一轮 logistic regression 的排序质量也可能随之提升。换句话说，它是一个 human-in-the-loop 的主动清洗过程：人工标注用于校准排序器，排序器用于降低人工检查量，保守排除用于让下一轮训练信号更干净。
+
+这个策略目前只适合先应用在 `wrong_label` 上。`bad_crop` 和 `out_of_label_space` 仍应主要依靠前置图像过滤、bbox 规则、Commons category / metadata 审计来解决，不应混进同一个 logistic regression 目标里。
+
 ## Git 提交脉络
 
 今天的实现可以从最近的提交记录中看到比较清晰的演化：

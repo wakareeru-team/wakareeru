@@ -57,6 +57,7 @@ data/
   jr_east_freight_series_wiki_commons.csv
   feature_cache/
   review/
+tools/                     # 人工 review 等交互式辅助工具
 src/crawler/               # 探索性 notebook 与实验流程
 docs/                      # 项目过程记录
 ```
@@ -95,6 +96,12 @@ python pipeline_entry.py --only siglip_filter
 
 ```bash
 python pipeline_entry.py --from manifest_crawling
+```
+
+启动人工噪声复核 UI：
+
+```bash
+python tools/noise_review_gradio.py
 ```
 
 可用阶段包括：

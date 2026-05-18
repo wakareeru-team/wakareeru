@@ -44,6 +44,7 @@ config/
   schema.sql               # 新数据库的基线 schema
   migrations/              # 既有数据库的增量迁移，按数字顺序执行
 data/                      # 生成数据、SQLite、图片、缓存与 review 输出
+tools/                     # 人工 review 等交互式辅助工具；不是自动 pipeline stage
 src/crawler/               # 探索性 notebook；不是稳定管线入口
 docs/                      # 项目过程记录与实验说明
 ```
@@ -75,6 +76,12 @@ python pipeline_entry.py --only siglip_filter
 
 ```bash
 python pipeline_entry.py --from manifest_crawling
+```
+
+启动人工噪声复核 UI：
+
+```bash
+python tools/noise_review_gradio.py
 ```
 
 开发检查：
