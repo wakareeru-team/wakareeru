@@ -2,6 +2,7 @@
 import argparse
 import sys
 from pathlib import Path
+from pipeline.constants import STAGE_COMPLETED, STAGE_INTERRUPT, STAGE_PASS
 from pipeline.utils import get_logger, load_pipeline_config
 
 PIPELINE_DIR = Path(__file__).resolve().parent / "pipeline"
@@ -140,8 +141,16 @@ def main():
         desc, fn = STAGES[key]
         logger.info("━━━ [%s] %s 开始 ━━━", key, desc)
         try:
-            fn(cfg)
-            logger.info("━━━ [%s] 完成 ━━━", key)
+            returned = fn(cfg)
+            if returned is None:
+                logger.info("━━━ [%s] 完成 ━━━", key)
+            elif returned == STAGE_COMPLETED:
+                logger.info("━━━ [%s] 完成 ━━━", key)
+            elif returned == STAGE_INTERRUPT:
+                logger.warning("━━━ [%s] 中断，跳过后续阶段 ━━━", key)
+                break
+            elif returned == STAGE_PASS:
+                logger.warning("━━━ [%s] 跳过，后续阶段继续 ━━━", key)   
         except Exception as e:
             logger.exception("[%s] 失败，管线中止：%s", key, e)
             sys.exit(1)

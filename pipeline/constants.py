@@ -1,3 +1,9 @@
+# Pipeline控制
+STAGE_COMPLETED = 0
+STAGE_INTERRUPT = 1
+STAGE_PASS = 2
+
+
 OPERATORS = [
     ("JR東日本", "JR East",    "JR東日本の車両形式"),
     ("JR東海",   "JR Central", "JR東海の車両形式"),

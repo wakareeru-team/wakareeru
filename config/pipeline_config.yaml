@@ -112,3 +112,8 @@ loss_noise_tracking:
   epoch_history_path: "demo_epoch_history.csv"
   model_dir: "model"
   model_checkpoint_prefix: "DINO_CLS_HEAD"
+
+loss_analysis:
+  loss_feature_dir: "demo_loss_feature.csv"
+  request_manual_review: true # 是否请求人工标记一部分数据，若是则直接跳出pipeline，并提示通过tool下review工具完成标记
+  
