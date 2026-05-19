@@ -17,6 +17,7 @@ dependencies:
   - tqdm
   - gradio
   - scikit-learn
+  - joblib
   - pip:
       - accelerate
       - huggingface-hub
