@@ -142,7 +142,7 @@ def main(config: dict | None = None) -> None:
         loss_tracking_cfg.get("epoch_history_path", "demo_epoch_history.csv"),
         config=config,
     )
-    model_dir = utils.join_data_root(loss_tracking_cfg.get("model_dir", "model"), config=config)
+    model_dir = utils.join_data_root(config["path"].get("model_dir", "model"), config=config)
     model_checkpoint_prefix = loss_tracking_cfg.get("model_checkpoint_prefix", "DINO_CLS_HEAD")
     embed_dim = int(loss_tracking_cfg['embedding_feature_dim'])
     lr_max = float(loss_tracking_cfg['learning_rate_high'])
