@@ -116,4 +116,7 @@ loss_noise_tracking:
 loss_analysis:
   loss_feature_dir: "demo_loss_feature.csv"
   request_manual_review: true # 是否请求人工标记一部分数据，若是则直接跳出pipeline，并提示通过tool下review工具完成标记
-  
+  feature_columns: ['mean', 'loss_tail_mean', 'loss_mean_pct_in_label',"error_rate", 'pred_label_rate']
+  noise_positive_label: ['wrong_label']
+  excluding_label: ['bad_crop', "out_of_label_space"]
+  clean_label: "ok"

@@ -123,6 +123,20 @@ CROP_STATUSES = {
     CROP_STATUS_REJECTED,
 }
 
+NOISE_REVIEW_LABELS = [
+    "ok",
+    "wrong_label",
+    "out_of_label_space",
+    "bad_crop",
+    "ambiguous",
+]
+
+NOISE_REVIEW_LABEL_OK = "ok"
+NOISE_REVIEW_LABEL_WRONG_LABEL = "wrong_label"
+NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE = "out_of_label_space"
+NOISE_REVIEW_LABEL_BAD_CROP = "bad_crop"
+NOISE_REVIEW_LABEL_AMBIGUOUS = "ambiguous"
+
 
 # ========= STAGE 3 manifest爬取 =========
 

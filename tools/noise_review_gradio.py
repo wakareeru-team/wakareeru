@@ -25,7 +25,7 @@ PROJECT_ROOT = find_project_root()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipeline import utils  # noqa: E402
+from pipeline import constants, utils  # noqa: E402
 
 
 REVIEW_CONFIG = {
@@ -36,7 +36,7 @@ REVIEW_CONFIG = {
     "samples_per_bin": 8,
     "random_seed": 42,
     "pad_frac": 0.04,
-    "review_labels": ["ok", "wrong_label", "out_of_label_space", "bad_crop", "ambiguous"],
+    "review_labels": constants.NOISE_REVIEW_LABELS,
     "review_label_col": "noise_review_label",
     "review_note_col": "noise_review_note",
     "reviewed_at_col": "noise_reviewed_at",
@@ -423,35 +423,35 @@ def build_review_app():
         )
         quick_ok_btn.click(
             lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, "ok"
+                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_OK
             ),
             inputs=[records_state, idx_state, note, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         quick_wrong_label_btn.click(
             lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, "wrong_label"
+                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_WRONG_LABEL
             ),
             inputs=[records_state, idx_state, note, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         quick_out_of_label_space_btn.click(
             lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, "out_of_label_space"
+                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE
             ),
             inputs=[records_state, idx_state, note, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         quick_bad_crop_btn.click(
             lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, "bad_crop"
+                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_BAD_CROP
             ),
             inputs=[records_state, idx_state, note, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         quick_ambiguous_btn.click(
             lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, "ambiguous"
+                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_AMBIGUOUS
             ),
             inputs=[records_state, idx_state, note, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
