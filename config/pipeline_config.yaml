@@ -13,6 +13,7 @@ path:
   manual_series_overrides_path: 'config/manual_series_overrides.csv'
   img_crawl_log_path: 'img_crawl_checkpoint.csv'
   llm_category_details_path: 'llm_category_details.csv'
+  model_dir: "model"
 
 
 # Crawler configuration
@@ -110,13 +111,16 @@ loss_noise_tracking:
   weight_decay: 1e-4
   loss_history_path: "demo_loss_history.csv"
   epoch_history_path: "demo_epoch_history.csv"
-  model_dir: "model"
   model_checkpoint_prefix: "DINO_CLS_HEAD"
 
 loss_analysis:
-  minimum_reviewed_samples: 200
   loss_feature_dir: "demo_loss_feature.csv"
   request_manual_review: true # 是否请求人工标记一部分数据，若是则直接跳出pipeline，并提示通过tool下review工具完成标记
+
+logistic_regression_filter:
+  minimum_reviewed_samples: 200
+  # ============ LR相关配置 ============
+  # 用于训练Logistic Regression的特征列。需要与loss_feature_dir中提供的特征列匹配。
   feature_columns: ['mean', 'loss_tail_mean', 'loss_mean_pct_in_label',"error_rate", 'pred_label_rate']
   noise_positive_label: ['wrong_label']
   excluding_label: ['bad_crop', "out_of_label_space"]
@@ -124,3 +128,9 @@ loss_analysis:
   test_ratio: 0.2
   fold_num: 4
   minimum_clean_recall: 0.9
+  lr_C: 1.0
+  solver: "lbfgs"
+  class_weight: "balanced"
+  max_iter: 1000
+  model_name_prefix: "LR_pipeline_"
+  model_pointer_path: "latest_lr_model.txt"

@@ -8,6 +8,7 @@ import re
 import sqlite3
 import sys
 from pathlib import Path
+import time
 from typing import Any
 
 import gradio as gr
@@ -19,23 +20,41 @@ from tqdm.auto import tqdm
 import constants
 import utils
 from sklearn.linear_model import LogisticRegression
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.metrics import average_precision_score, classification_report, confusion_matrix, roc_auc_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
-
+import joblib
 
 logger = utils.get_logger("stage_12_logistic_regression_filter")
 
 
+
+# 具有Threshold的Logistic Regression包装类，方便后续GridSearch调优threshold，不需要额外记录参数，并防止threshold不匹配
+class LogisticRegressionWithThreshold(BaseEstimator, ClassifierMixin):
+    def __init__(self, estimator: LogisticRegression, threshold: float = 0.5):
+        self.estimator = estimator
+        self.threshold = threshold
+
+    def fit(self, X, y):
+        self.estimator.fit(X, y)
+        self.classes_ = self.estimator.classes_
+        return self
+    
+    def predict(self, X):
+        prob = self.estimator.predict_proba(X)[:, 1]
+        return (prob >= self.threshold).astype(int)
+    def predict_proba(self, X):
+        return self.estimator.predict_proba(X)
+    
 def main(config: dict | None = None) -> None:
     if config is None:
         config = utils.load_pipeline_config()
-
+    lr_config = config['logistic_regression_filter']
     utils.init_db(config=config)
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     logger.info("对人工标记数据进行logistic regression")
-    loss_analysis_config = config['loss_analysis']
     features = pd.read_csv(utils.join_data_root(config['loss_analysis']['loss_feature_dir'], config=config))
 
 
@@ -47,20 +66,20 @@ def main(config: dict | None = None) -> None:
         '''
         metas = pd.read_sql_query(SQLquery, conn)
     
-    feature_columns = loss_analysis_config['feature_columns']
+    feature_columns = lr_config['feature_columns']
 
     reviewed_data = pd.merge(left=metas, right=features, on='crop_id', how='inner')
-    if len(reviewed_data) < loss_analysis_config['minimum_reviewed_samples']:
-        logger.warning(f"已审核数据样本量{len(reviewed_data)}小于设定的最小值{loss_analysis_config['minimum_reviewed_samples']}，可能无法训练出有效的模型")
+    if len(reviewed_data) < lr_config['minimum_reviewed_samples']:
+        logger.warning(f"已审核数据样本量{len(reviewed_data)}小于设定的最小值{lr_config['minimum_reviewed_samples']}，可能无法训练出有效的模型")
         return constants.STAGE_INTERRUPT # type: ignore
     logger.info(f"共有{len(reviewed_data)}条已审核数据")
 
 
 
 
-    noise_positive_label = loss_analysis_config['noise_positive_label']
-    excluding_label = loss_analysis_config['excluding_label']
-    clean_label = loss_analysis_config['clean_label']
+    noise_positive_label = lr_config['noise_positive_label']
+    excluding_label = lr_config['excluding_label']
+    clean_label = lr_config['clean_label']
 
     training_labels = set(noise_positive_label) | {clean_label}
     filtered = reviewed_data[reviewed_data['noise_review_label'].isin(training_labels)].copy()
@@ -78,12 +97,12 @@ def main(config: dict | None = None) -> None:
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
-        test_size=loss_analysis_config['test_ratio'],
+        test_size=lr_config['test_ratio'],
         random_state=42,
         stratify=y,
     )
     # holdout test集，以免在小样本上过拟合，无法评估模型在新数据上的表现
-    k_fold = min(loss_analysis_config['fold_num'], int(np.bincount(y_train, minlength=2).min()))
+    k_fold = min(lr_config['fold_num'], int(np.bincount(y_train, minlength=2).min()))
     if k_fold < 2:
         logger.warning("训练集正负样本数量不足，无法进行交叉验证。")
         return constants.STAGE_INTERRUPT  # type: ignore
@@ -92,11 +111,11 @@ def main(config: dict | None = None) -> None:
     model = make_pipeline(
         StandardScaler(),
         LogisticRegression(
-            C=1.0,
-            solver="lbfgs",
-            class_weight="balanced",
+            C=lr_config['lr_C'],
+            solver=lr_config['solver'],
+            class_weight=lr_config['class_weight'],
             random_state=42,
-            max_iter=1000,
+            max_iter=lr_config['max_iter'],
         ),
     )
 
@@ -107,7 +126,7 @@ def main(config: dict | None = None) -> None:
     
     # GridSearch对threshold进行调优，选取在clean recall达到指定最小值的前提下noise recall最高的threshold
     thresholds = np.linspace(0.05, 0.95, 19)
-    clean_recall_min = loss_analysis_config['minimum_clean_recall']
+    clean_recall_min = lr_config['minimum_clean_recall']
     logger.info(f"开始网格搜索调优threshold，要求clean recall至少达到{clean_recall_min}")
     best_threshold = 0
     max_noise_recall = 0
@@ -128,6 +147,19 @@ def main(config: dict | None = None) -> None:
     logger.info(classification_report(y_train, pred,))
     logger.info(f"训练集上的ROC AUC: {roc_auc_score(y_train, prob)}")
     
+    
+    model = make_pipeline(
+        StandardScaler(),
+        LogisticRegressionWithThreshold(
+            LogisticRegression(
+                C=lr_config['lr_C'],
+                solver=lr_config['solver'],
+                class_weight=lr_config['class_weight'],
+                random_state=42,
+                max_iter=lr_config['max_iter'],
+            ), 
+            threshold=best_threshold),
+    )
     # 在测试集上评估模型性能
     model.fit(X_train, y_train)
     test_pred = (model.predict_proba(X_test)[:, 1] > best_threshold).astype(int)
@@ -135,7 +167,11 @@ def main(config: dict | None = None) -> None:
     logger.info(classification_report(y_test, test_pred))
     logger.info(f"测试集上的ROC AUC: {roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])}")
 
-    
+    model_name = lr_config['model_name_prefix'] + time.strftime("%Y%m%d-%H%M", time.localtime()) + ".joblib"
+    joblib.dump(model, utils.join_data_root(config['path']['model_dir']) / model_name)
+    with open(utils.join_data_root(config['path']['model_dir']) / lr_config['model_pointer_path'], "w") as f:
+        f.write(model_name)
+    logger.info(f"模型已保存: {model_name}，并更新最新指针文件: {lr_config['model_pointer_path']}")
 
 
 if __name__ == "__main__":
