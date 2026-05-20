@@ -134,3 +134,7 @@ logistic_regression_filter:
   max_iter: 1000
   model_name_prefix: "LR_pipeline_"
   model_pointer_path: "latest_lr_model.txt"
+
+lr_prediction: # 对未知数据应用LR模型
+  lr_model_path: 'latest' # 可以是具体的模型文件路径，或者"latest"表示使用最新训练好的模型
+  reprocess: false #跳过已经有LR预测结果的数据

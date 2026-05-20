@@ -110,6 +110,11 @@ CREATE TABLE IF NOT EXISTS crops (
     noise_reviewed_at      TEXT,
     noise_review_score_col TEXT,
 
+    -- Model classification output for crop noise analysis (logistic regression)
+    noise_predicted_prob REAL,
+    noise_predicted_label TEXT,
+    noise_prediction_model TEXT,
+
     UNIQUE (image_id, detector_model, nms_iou_threshold, crop_index)
 );
 
