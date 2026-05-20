@@ -20,33 +20,14 @@ from tqdm.auto import tqdm
 import constants
 import utils
 from sklearn.linear_model import LogisticRegression
-from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.metrics import average_precision_score, classification_report, confusion_matrix, roc_auc_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
 import joblib
+from lr_model import LogisticRegressionWithThreshold
 
 logger = utils.get_logger("stage_12_logistic_regression_filter")
-
-
-
-# 具有Threshold的Logistic Regression包装类，方便后续GridSearch调优threshold，不需要额外记录参数，并防止threshold不匹配
-class LogisticRegressionWithThreshold(BaseEstimator, ClassifierMixin):
-    def __init__(self, estimator: LogisticRegression, threshold: float = 0.5):
-        self.estimator = estimator
-        self.threshold = threshold
-
-    def fit(self, X, y):
-        self.estimator.fit(X, y)
-        self.classes_ = self.estimator.classes_
-        return self
-    
-    def predict(self, X):
-        prob = self.estimator.predict_proba(X)[:, 1]
-        return (prob >= self.threshold).astype(int)
-    def predict_proba(self, X):
-        return self.estimator.predict_proba(X)
     
 def main(config: dict | None = None) -> None:
     if config is None:
@@ -162,7 +143,7 @@ def main(config: dict | None = None) -> None:
     )
     # 在测试集上评估模型性能
     model.fit(X_train, y_train)
-    test_pred = (model.predict_proba(X_test)[:, 1] > best_threshold).astype(int)
+    test_pred = (model.predict(X_test))
     logger.info("测试集性能评估:")
     logger.info(classification_report(y_test, test_pred))
     logger.info(f"测试集上的ROC AUC: {roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])}")
@@ -172,7 +153,7 @@ def main(config: dict | None = None) -> None:
     with open(utils.join_data_root(config['path']['model_dir']) / lr_config['model_pointer_path'], "w") as f:
         f.write(model_name)
     logger.info(f"模型已保存: {model_name}，并更新最新指针文件: {lr_config['model_pointer_path']}")
-
+    
 
 if __name__ == "__main__":
     main()
