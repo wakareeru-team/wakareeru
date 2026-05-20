@@ -1,0 +1,246 @@
+import json
+import os
+import re
+import sqlite3
+import time
+import unicodedata
+from pathlib import Path
+
+import pandas as pd
+from tqdm.auto import tqdm
+
+import constants
+import utils
+
+import joblib
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from lr_model import register_legacy_main_alias
+
+logger = utils.get_logger("stage_14_store_crops")
+
+
+
+
+
+def label_to_ascii(label: str, fallback: str = "label") -> str:
+    """Convert a Japanese train label into a deterministic ASCII slug.
+
+    This is intentionally rule-based rather than LLM-based so saved dataset
+    paths remain stable across runs.
+    """
+    text = unicodedata.normalize("NFKC", str(label)).strip().lower()
+    for src, dst in constants.LABEL_ASCII_REPLACEMENTS:
+        text = text.replace(src.lower(), dst)
+    text = re.sub(r"[^0-9a-z]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    text = re.sub(r"\b(kiha|kumoha|kuha|moha|saha|deha|roha|saro|moro|kani)_(\d)", r"\1\2", text)
+    return text or fallback
+
+
+def save_crop_image(
+    *,
+    source_image_path: str | Path,
+    output_path: str | Path,
+    box_x1: float,
+    box_y1: float,
+    box_x2: float,
+    box_y2: float,
+    pad_frac: float = 0.04,
+    image_format: str | None = None,
+    jpeg_quality: int = 95,
+) -> Path:
+    """Crop one explicit bbox from an image and save it to disk."""
+    source_image_path = Path(source_image_path)
+    output_path = Path(output_path)
+    if output_path.suffix == "":
+        output_path = output_path.with_suffix(".jpeg")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    img = utils.load_img_with_orientation(source_image_path)
+    box_width = float(box_x2) - float(box_x1)
+    box_height = float(box_y2) - float(box_y1)
+    if box_width <= 0 or box_height <= 0:
+        raise ValueError(f"Invalid crop box: ({box_x1}, {box_y1}, {box_x2}, {box_y2})")
+
+    pad = max(box_width, box_height) * float(pad_frac)
+    left = max(0, int(float(box_x1) - pad))
+    top = max(0, int(float(box_y1) - pad))
+    right = min(img.width, int(float(box_x2) + pad))
+    bottom = min(img.height, int(float(box_y2) + pad))
+    if right <= left or bottom <= top:
+        raise ValueError(
+            "Padded crop box is outside image bounds: "
+            f"({left}, {top}, {right}, {bottom}) for {source_image_path}"
+        )
+
+    crop = img.crop((left, top, right, bottom))
+    if crop.mode != "RGB":
+        crop = crop.convert("RGB")
+
+    suffix = output_path.suffix.lower()
+    save_format = image_format
+    if save_format is None:
+        save_format = "JPEG" if suffix in {".jpg", ".jpeg"} else suffix.lstrip(".").upper()
+
+    save_kwargs = {}
+    if save_format.upper() in {"JPEG", "JPG"}:
+        save_format = "JPEG"
+        save_kwargs["quality"] = int(jpeg_quality)
+    crop.save(output_path, format=save_format, **save_kwargs)
+    return output_path
+
+
+def validate_config_column_names(columns: list[str]) -> None:
+    unsafe = [col for col in columns if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col)]
+    if unsafe:
+        raise ValueError(f"Unsafe configured column names: {unsafe}")
+
+
+def build_en_label(
+    metadata: pd.DataFrame,
+    *,
+    label_column: str,
+) -> pd.DataFrame:
+    if label_column not in metadata.columns:
+        raise ValueError(f"image metadata中不存在label列: {label_column!r}")
+
+    metadata = metadata.copy()
+    metadata["label"] = metadata[label_column]
+    metadata["label_en"] = metadata["label"].map(lambda label: label_to_ascii(label, fallback="unknown"))
+    return metadata
+
+
+def build_label_tables(metadata: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    labels = (
+        metadata[["label", "label_en"]]
+        .dropna(subset=["label"])
+        .drop_duplicates()
+        .sort_values(["label_en", "label"], kind="stable")
+        .reset_index(drop=True)
+    )
+    labels.insert(0, "label_id", range(len(labels)))
+
+    counts = metadata["label"].value_counts(dropna=False).rename("count").reset_index()
+    counts.columns = ["label", "count"]
+    labels = labels.merge(counts, on="label", how="left")
+
+    metadata = metadata.merge(labels[["label", "label_id"]], on="label", how="left")
+    metadata["label_id"] = metadata["label_id"].astype("Int64")
+    return metadata, labels
+
+
+def main(config: dict | None = None) -> None:
+    if config is None:
+        config = utils.load_pipeline_config()
+
+    utils.init_db(config=config)
+    db_path = utils.join_data_root(config["path"]["db_path"], config=config)
+    crops_storage_config = config["crops_storage"]
+    
+    where_conditions = []
+    if crops_storage_config["reprocess"]:
+        logger.info("crops_storage配置为reprocess=true，将重新处理所有crop数据")
+
+    else:
+        logger.info("crops_storage配置为reprocess=false，将跳过已经存储crop数据")
+        where_conditions.append(f"c.saved = 0") # 只处理未保存过的crop数据
+
+    if crops_storage_config["save_only_manual_reviewed"]:
+        logger.info("将仅保存人工审核过的crop数据到数据库，跳过未审核数据（包括自动审核和未审核数据）")
+        where_conditions.append(f"c.noise_review_label = 'ok'")
+    else:
+        logger.info("将保存所有crop数据到数据库，包括人工审核过的、自动审核过的和未审核的数据")
+            
+        
+
+    if crops_storage_config["format"] == "flatten":
+        # flatten格式：将所有crop数据存储在同一层级的表中，表结构包含series_id、submodel_id、crop_id等字段
+        # 先抓到所有manifest数据，判断哪些crop_id已经存储过了
+
+        where_sql = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
+        
+
+        with sqlite3.connect(db_path) as conn:
+            metadata_columns = list(crops_storage_config["image_metadata_columns"])
+            validate_config_column_names(metadata_columns)
+            image_select_cols = [f"i.{col}" for col in metadata_columns]
+            crop_sql = f"""
+                SELECT
+                    c.id AS crop_id,
+                    c.image_id,
+                    c.box_x1,
+                    c.box_y1,
+                    c.box_x2,
+                    c.box_y2,
+                    {', '.join(image_select_cols)}
+                FROM crops c
+                JOIN images i ON i.id = c.image_id
+                {where_sql}
+                ORDER BY c.id
+            """
+            metadata = pd.read_sql_query(crop_sql, conn)
+            
+        metadata = build_en_label(
+            metadata,
+            label_column=crops_storage_config["label_column"],
+        )
+        
+        logger.info("已加载%d条待裁剪crop及图片元数据。", len(metadata))
+        logger.info("metadata列: %s", list(metadata.columns))
+        
+        
+        saved_rows = []
+        for _, row in tqdm(metadata.iterrows(), total=len(metadata), desc="存盘裁剪图像"):
+            output_filename = f"{row['image_id']:08d}_{row['crop_id']:08d}.{crops_storage_config['image_extension']}"
+            image_path = config['path']["dataset_img_subdir"] + '/' + output_filename
+            output_path = utils.join_data_root(
+                '/'.join([config['path']["dataset_dir"], config['path']["dataset_img_subdir"], output_filename]),
+                config=config,
+            )
+            source_path = utils.join_data_root(row["downloaded_path"], config=config)
+            try:
+                save_crop_image(
+                    source_image_path=source_path,
+                    output_path=output_path,
+                    box_x1=row["box_x1"],
+                    box_y1=row["box_y1"],
+                    box_x2=row["box_x2"],
+                    box_y2=row["box_y2"],
+                    pad_frac=crops_storage_config["crop_pad_frac"],
+                    image_format=crops_storage_config["image_extension"],
+                    jpeg_quality=crops_storage_config['jpeg_quality']
+                )
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute("UPDATE crops SET saved = 1, crop_path = ? WHERE id = ?", (image_path, row["crop_id"]))
+                    conn.commit()
+                saved_row = row.to_dict()
+                saved_row["image_path"] = image_path
+                saved_rows.append(saved_row)
+            except Exception as e:
+                logger.error(f"保存crop_id={row['crop_id']}失败: {e}")
+                continue
+        
+        metadata = pd.DataFrame(saved_rows)
+        metadata, labels = build_label_tables(metadata)
+        output_metadata_columns = list(crops_storage_config["metadata_columns"])
+        missing_metadata_columns = [col for col in output_metadata_columns if col not in metadata.columns]
+        if missing_metadata_columns:
+            raise ValueError(f"metadata输出列不存在: {missing_metadata_columns}")
+        metadata = metadata[output_metadata_columns]
+
+        dataset_root = utils.join_data_root(config['path']["dataset_dir"], config=config)
+        metadata_path = dataset_root / "metadata.csv"
+        labels_path = dataset_root / "labels.csv"
+        dataset_root.mkdir(parents=True, exist_ok=True)
+        metadata.to_csv(metadata_path, index=False, encoding="utf-8")
+        labels.to_csv(labels_path, index=False, encoding="utf-8")
+
+        logger.info("crop图像保存完成，已成功保存%d条crop数据。", len(metadata))
+        logger.info("metadata已保存至%s，labels已保存至%s。", metadata_path, labels_path)
+        
+        return constants.STAGE_COMPLETED #type:ignore flatten格式处理完成，退出程序
+
+
+if __name__ == "__main__":
+    main()

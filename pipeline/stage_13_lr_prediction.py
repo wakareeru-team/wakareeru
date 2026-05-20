@@ -1,8 +1,3 @@
-"""Template for adding a new Wakareeru pipeline stage.
-
-Copy this file to ``stage_XX_name.py`` and keep only the imports you use.
-"""
-
 import json
 import os
 import sqlite3

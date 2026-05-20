@@ -242,3 +242,26 @@ SIGLIP_CROP_PROMPT_TO_LABEL = {
     "a photo of a decoration board": "no_train",
     "decoration_board": "no_train",
 }
+
+
+LABEL_ASCII_REPLACEMENTS = (
+    ("非貫通型", " non kantsu "),
+    ("非貫通", " non kantsu "),
+    ("貫通型", " kantsu "),
+    ("貫通", " kantsu "),
+    ("キハ", " kiha "),
+    ("クモハ", " kumoha "),
+    ("クハ", " kuha "),
+    ("モハ", " moha "),
+    ("サハ", " saha "),
+    ("デハ", " deha "),
+    ("ロハ", " roha "),
+    ("サロ", " saro "),
+    ("モロ", " moro "),
+    ("カニ", " kani "),
+    ("番台", " "),
+    ("号機", " "),
+    ("系", " "),
+    ("形", " "),
+    ("型", " "),
+)

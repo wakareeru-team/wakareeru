@@ -115,6 +115,9 @@ CREATE TABLE IF NOT EXISTS crops (
     noise_predicted_label TEXT,
     noise_prediction_model TEXT,
 
+    -- offline crop storage
+    saved INTEGER NOT NULL DEFAULT 0, -- 0: not saved, 1: saved to disk
+    crop_path TEXT, -- relative path to saved crop image, e.g. "crops/123.jpg"
     UNIQUE (image_id, detector_model, nms_iou_threshold, crop_index)
 );
 
