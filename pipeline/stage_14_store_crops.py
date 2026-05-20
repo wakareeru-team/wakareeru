@@ -130,6 +130,17 @@ def build_label_tables(metadata: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
     return metadata, labels
 
 
+def flush_crop_save_updates(db_path: Path, updates: list[tuple[str, int]]) -> None:
+    if not updates:
+        return
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            "UPDATE crops SET saved = 1, crop_path = ? WHERE id = ?",
+            updates,
+        )
+        conn.commit()
+
+
 def main(config: dict | None = None) -> None:
     if config is None:
         config = utils.load_pipeline_config()
@@ -189,39 +200,54 @@ def main(config: dict | None = None) -> None:
         logger.info("已加载%d条待裁剪crop及图片元数据。", len(metadata))
         logger.info("metadata列: %s", list(metadata.columns))
         
+        dataset_root = utils.join_data_root(config['path']["dataset_dir"], config=config)
+        dataset_img_subdir = config['path']["dataset_img_subdir"]
+        image_extension = crops_storage_config["image_extension"].lower().lstrip(".")
+        output_filenames = (
+            metadata["image_id"].map(lambda value: f"{int(value):08d}")
+            + "_"
+            + metadata["crop_id"].map(lambda value: f"{int(value):08d}")
+            + f".{image_extension}"
+        )
+        metadata["image_path"] = dataset_img_subdir + "/" + output_filenames
+        metadata["output_path"] = metadata["image_path"].map(lambda path: dataset_root / path)
+        metadata["source_path"] = metadata["downloaded_path"].map(
+            lambda path: utils.join_data_root(str(path), config=config)
+        )
         
         saved_rows = []
+        db_updates = []
+        db_update_batch_size = 100
         for _, row in tqdm(metadata.iterrows(), total=len(metadata), desc="存盘裁剪图像"):
-            output_filename = f"{row['image_id']:08d}_{row['crop_id']:08d}.{crops_storage_config['image_extension']}"
-            image_path = config['path']["dataset_img_subdir"] + '/' + output_filename
-            output_path = utils.join_data_root(
-                '/'.join([config['path']["dataset_dir"], config['path']["dataset_img_subdir"], output_filename]),
-                config=config,
-            )
-            source_path = utils.join_data_root(row["downloaded_path"], config=config)
             try:
                 save_crop_image(
-                    source_image_path=source_path,
-                    output_path=output_path,
+                    source_image_path=row["source_path"],
+                    output_path=row["output_path"],
                     box_x1=row["box_x1"],
                     box_y1=row["box_y1"],
                     box_x2=row["box_x2"],
                     box_y2=row["box_y2"],
                     pad_frac=crops_storage_config["crop_pad_frac"],
-                    image_format=crops_storage_config["image_extension"],
+                    image_format=image_extension,
                     jpeg_quality=crops_storage_config['jpeg_quality']
                 )
-                with sqlite3.connect(db_path) as conn:
-                    conn.execute("UPDATE crops SET saved = 1, crop_path = ? WHERE id = ?", (image_path, row["crop_id"]))
-                    conn.commit()
                 saved_row = row.to_dict()
-                saved_row["image_path"] = image_path
                 saved_rows.append(saved_row)
+                db_updates.append((row["image_path"], int(row["crop_id"])))
+                if len(db_updates) >= db_update_batch_size:
+                    flush_crop_save_updates(db_path, db_updates)
+                    db_updates.clear()
             except Exception as e:
                 logger.error(f"保存crop_id={row['crop_id']}失败: {e}")
                 continue
+
+        flush_crop_save_updates(db_path, db_updates)
         
         metadata = pd.DataFrame(saved_rows)
+        if metadata.empty:
+            logger.warning("没有成功保存的crop，跳过metadata和labels写入。")
+            return constants.STAGE_PASS  # type: ignore
+
         metadata, labels = build_label_tables(metadata)
         output_metadata_columns = list(crops_storage_config["metadata_columns"])
         missing_metadata_columns = [col for col in output_metadata_columns if col not in metadata.columns]
@@ -229,7 +255,6 @@ def main(config: dict | None = None) -> None:
             raise ValueError(f"metadata输出列不存在: {missing_metadata_columns}")
         metadata = metadata[output_metadata_columns]
 
-        dataset_root = utils.join_data_root(config['path']["dataset_dir"], config=config)
         metadata_path = dataset_root / "metadata.csv"
         labels_path = dataset_root / "labels.csv"
         dataset_root.mkdir(parents=True, exist_ok=True)
