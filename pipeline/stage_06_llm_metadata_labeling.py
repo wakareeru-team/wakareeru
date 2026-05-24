@@ -26,11 +26,11 @@ def _as_bool(value, default: bool = False) -> bool:
 
 
 def build_web_search_tools(llm_config: dict) -> list[dict]:
-    if not _as_bool(llm_config.get("web_search_enabled"), default=False):
+    if not _as_bool(llm_config["web_search_enabled"]):
         return []
 
     tool = {"type": "web_search"}
-    context_size = llm_config.get("web_search_context_size")
+    context_size = llm_config["web_search_context_size"]
     if context_size:
         tool["search_context_size"] = str(context_size)
     return [tool]
@@ -106,7 +106,7 @@ def main(config: dict | None = None):
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     openai_client = OpenAI()
     tools = build_web_search_tools(llm_config)
-    tool_choice = llm_config.get("web_search_tool_choice") if tools else None
+    tool_choice = llm_config["web_search_tool_choice"] if tools else None
     if tools:
         logger.info("LLM metadata labeling 已启用 OpenAI web_search tool: %s", tools)
 
@@ -145,7 +145,7 @@ def main(config: dict | None = None):
     llm_details = pd.DataFrame(llm_details_rows)
     
     details_path = utils.join_data_root(
-        config["path"].get("llm_category_details_path", "llm_category_details.csv"),
+        config["path"]["llm_category_details_path"],
         config=config,
     )
     details_path.parent.mkdir(parents=True, exist_ok=True)

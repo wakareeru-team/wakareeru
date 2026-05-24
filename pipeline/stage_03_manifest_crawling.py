@@ -83,11 +83,11 @@ def select_models_to_crawl(
     if "needs_review" in models:
         models = models[models["needs_review"] != True]
 
-    full_on = _as_bool(crawler_config.get("full_series_crawling"), default=False)
+    full_on = _as_bool(crawler_config["full_series_crawling"])
     if full_on:
         return models.reset_index(drop=True), "全量"
 
-    series_scope = crawler_config.get("series_test_scope") or []
+    series_scope = crawler_config["series_test_scope"]
     if isinstance(series_scope, str):
         series_scope = [series_scope]
     if not series_scope:
@@ -565,13 +565,13 @@ def main(config_override=None):
     db_path = utils.join_data_root(cfg["path"]["db_path"], config=cfg)
     models = load_commons_models(utils.join_data_root(cfg["path"]["series_commons_path"], config=cfg))
     selected_models, scope_name = select_models_to_crawl(models, crawler_config)
-    full_on = _as_bool(crawler_config.get("full_series_crawling"), default=False)
+    full_on = _as_bool(crawler_config["full_series_crawling"])
     if full_on:
         logger.warning("已设置为全量爬取，预计耗时较长；如非必要请先用 series_test_scope 测试部分车型")
 
-    max_files_per_category = int(crawler_config.get("manifest_max_files_per_category", 50))
-    max_depth = int(crawler_config.get("manifest_max_depth", 4))
-    reprocess = _as_bool(crawler_config.get("manifest_reprocess"), default=False)
+    max_files_per_category = int(crawler_config["manifest_max_files_per_category"])
+    max_depth = int(crawler_config["manifest_max_depth"])
+    reprocess = _as_bool(crawler_config["manifest_reprocess"])
     logger.info(
         "Manifest 爬取模式：%s；车型数：%d；每个分类最多文件数：%d；递归深度：%d；覆盖重爬：%s",
         scope_name,
