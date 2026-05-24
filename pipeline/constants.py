@@ -216,6 +216,7 @@ LLM_LABEL_DETAIL_PROMPT = """
 - Kiha 147, 因为他是kiha 40的改造型，所以submodel: "Kiha 147", bandai: ""
 - C57 1号机,不是子车型也不是番台 submodel: "C57", bandai: ""
 - 新干线E5系没有子车型, submodel: "E5", bandai: ""
+- 415系，在wiki下被归为113系，但他应该为新的子车型，submodel: "415", bandai: ""
 
 以上内容请输出为JSON数组，每个元素格式如下：
 {"submodel": <车型>, "bandai": <番台>, "operator_en": <运营公司英文名>, "operator_jp": <运营公司日文名>, "special_formation": <特殊编成>, "special_livery": <特殊涂装>}

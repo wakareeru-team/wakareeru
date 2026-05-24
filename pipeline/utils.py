@@ -7,6 +7,7 @@ import os
 import pandas as pd
 import numpy as np
 from PIL import Image, ImageOps
+
 # ================ Config Utils ================
 
 def load_pipeline_config(config_path: str | Path | None = None) -> dict:
@@ -119,6 +120,61 @@ def load_crop(
         _source_image_path(row, img_root=img_root, config=config)
     )
     return crop_from_image(img, row, pad_frac=pad_frac)
+
+
+# ================ Torch Cache Utils ================
+
+def save_pt_shard(
+    shard_dir: str | Path,
+    shard_index: int,
+    payload: dict,
+    prefix: str = "part",
+) -> Path:
+    """Save one ordered PyTorch shard under ``shard_dir``."""
+    import torch
+
+    shard_dir = Path(shard_dir)
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    shard_path = shard_dir / f"{prefix}_{shard_index:06d}.pt"
+    torch.save(payload, shard_path)
+    return shard_path
+
+
+def aggregate_pt_shards(
+    shard_dir: str | Path,
+    output_path: str | Path,
+    tensor_keys: list[str],
+    metadata: dict | None = None,
+    prefix: str = "part",
+    dim: int = 0,
+) -> dict:
+    """Concatenate tensor values from ordered ``.pt`` shards and save one cache file."""
+    import torch
+
+    shard_dir = Path(shard_dir)
+    output_path = Path(output_path)
+    shard_paths = sorted(shard_dir.glob(f"{prefix}_*.pt"))
+    if not shard_paths:
+        raise FileNotFoundError(f"No shard files found in {shard_dir} with prefix {prefix!r}")
+
+    buckets = {key: [] for key in tensor_keys}
+    for shard_path in shard_paths:
+        shard = torch.load(shard_path, map_location="cpu")
+        for key in tensor_keys:
+            if key not in shard:
+                raise KeyError(f"Shard {shard_path} missing tensor key {key!r}")
+            buckets[key].append(shard[key])
+
+    aggregated = {
+        key: torch.cat(values, dim=dim)
+        for key, values in buckets.items()
+    }
+    if metadata:
+        aggregated.update(metadata)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(aggregated, output_path)
+    return aggregated
 
 
 

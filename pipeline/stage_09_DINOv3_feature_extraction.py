@@ -233,31 +233,19 @@ def main(config=None):
     noise_detection_cfg = config['noise_detection']
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     device = get_torch_device()
-    label_granularity = noise_detection_cfg.get("label_granularity", "fine_grained_series")
+    label_granularity = noise_detection_cfg["label_granularity"]
     feature_cache_dir = utils.join_data_root(
-        noise_detection_cfg.get("feature_cache_dir", "feature_cache"),
+        noise_detection_cfg["feature_cache_dir"],
         config=config,
     )
-    active_feature_cache_file = noise_detection_cfg.get("active_feature_cache_file", "latest")
-    latest_feature_cache_path = feature_cache_dir / noise_detection_cfg.get(
-        "latest_feature_cache_file",
-        "latest_feature_cache.txt",
-    )
-    loss_history_path = utils.join_data_root(
-        noise_detection_cfg.get("loss_history_path", "demo_loss_history.csv"),
-        config=config,
-    )
-    epoch_history_path = utils.join_data_root(
-        noise_detection_cfg.get("epoch_history_path", "demo_epoch_history.csv"),
-        config=config,
-    )
+    latest_feature_cache_path = feature_cache_dir / noise_detection_cfg["latest_feature_cache_file"]
     logger.info("Starting DINOv3 feature extraction...")
     
     
     # 加载数据
     df_crops = load_crop_manifest(
     db_path=db_path,
-    series= None if noise_detection_cfg.get("full_series") else noise_detection_cfg.get("series_test_scope"),
+    series= None if noise_detection_cfg["full_series"] else noise_detection_cfg["series_test_scope"],
     label_granularity=label_granularity,
     )
     
@@ -280,7 +268,10 @@ def main(config=None):
     
     
     
-    batch_size = noise_detection_cfg.get("feature_extraction_batch_size", 16)
+    batch_size = noise_detection_cfg["feature_extraction_batch_size"]
+    shard_size = int(noise_detection_cfg["feature_cache_shard_size"])
+    if shard_size <= 0:
+        raise ValueError("noise_detection.feature_cache_shard_size must be > 0")
     dataset = CropImageDataset(
         df_crops,
         img_root=utils.get_data_root(config),
@@ -291,17 +282,45 @@ def main(config=None):
         batch_size=batch_size,
         shuffle=False,
         collate_fn=FeatureCollator(processor, label_to_id),
-        num_workers=noise_detection_cfg.get("extration_workers", 0),
+        num_workers=noise_detection_cfg["extration_workers"],
     )
     
-    
-    all_feature = []
-    all_labels = []
-    all_crop_ids = []
+    data_length = df_crops.shape[0]
+    class_num = len(label_to_id)
+    file_name = f"demo_dinov3_features_{data_length}crops_{class_num}labels.pt"
+    feature_cache_dir.mkdir(parents=True, exist_ok=True)
+    shard_dir = feature_cache_dir / "shards" / f"{Path(file_name).stem}_{time.strftime('%Y%m%d-%H%M%S', time.localtime())}"
+    logger.info("特征将先按每片最多 %d 个样本保存到 %s", shard_size, shard_dir)
+
+    shard_features = []
+    shard_labels = []
+    shard_crop_ids = []
+    shard_sample_count = 0
+    shard_index = 0
+
+    def flush_feature_shard() -> None:
+        nonlocal shard_features, shard_labels, shard_crop_ids, shard_sample_count, shard_index
+        if shard_sample_count == 0:
+            return
+        shard_path = utils.save_pt_shard(
+            shard_dir,
+            shard_index,
+            {
+                "features": torch.cat(shard_features, dim=0),
+                "labels": torch.cat(shard_labels, dim=0),
+                "crop_ids": torch.cat(shard_crop_ids, dim=0),
+            },
+        )
+        logger.info("已保存特征分片 %s，样本数=%d", shard_path.name, shard_sample_count)
+        shard_features = []
+        shard_labels = []
+        shard_crop_ids = []
+        shard_sample_count = 0
+        shard_index += 1
 
     model.eval()
     with torch.inference_mode():
-        for batch in tqdm(dataloader):
+        for batch in tqdm(dataloader, total=len(dataloader), desc="DINOv3 feature extraction", unit="batch"):
             
             image_tensors, labels, crop_ids = batch
             image_tensors = image_tensors.to(model.device)
@@ -309,30 +328,36 @@ def main(config=None):
             
             pooled_output = outputs.pooler_output #CLS output
             
-            all_feature.append(pooled_output.cpu())
-            all_labels.append(labels)
-            all_crop_ids.append(crop_ids)
+            shard_features.append(pooled_output.cpu())
+            shard_labels.append(labels.cpu())
+            shard_crop_ids.append(crop_ids.cpu())
+            shard_sample_count += int(crop_ids.numel())
+            if shard_sample_count >= shard_size:
+                flush_feature_shard()
 
-    feature_cache = {
-        "features": torch.cat(all_feature, dim=0),
-        "labels": torch.cat(all_labels, dim=0),
-        "crop_ids": torch.cat(all_crop_ids, dim=0),
-        "label_to_id": label_to_id,
-        "id_to_label": id_to_label,
-        "model_name": pretrained_model_name,
-    }
+    flush_feature_shard()
 
 
     # saving
 
-    data_length = df_crops.shape[0]
-    class_num = len(label_to_id)
-    logger.info(f"特征提取完成。共处理 {len(df_crops)} 个crop，提取标签共{class_num}。开始保存特征缓存...")
-    file_name = f"demo_dinov3_features_{data_length}crops_{class_num}labels.pt"
-    feature_cache_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(feature_cache, feature_cache_dir / file_name)
+    logger.info(f"特征提取完成。共处理 {len(df_crops)} 个crop，提取标签共{class_num}。开始聚合特征分片...")
+    feature_cache = utils.aggregate_pt_shards(
+        shard_dir,
+        feature_cache_dir / file_name,
+        tensor_keys=["features", "labels", "crop_ids"],
+        metadata={
+            "label_to_id": label_to_id,
+            "id_to_label": id_to_label,
+            "model_name": pretrained_model_name,
+            "shard_dir": str(shard_dir),
+        },
+    )
     latest_feature_cache_path.write_text(file_name, encoding="utf-8")
-    logger.info(f"特征缓存保存完成: {feature_cache_dir / file_name}，并更新latest指针。")
+    logger.info(
+        "特征缓存保存完成: %s，样本数=%d，并更新latest指针。",
+        feature_cache_dir / file_name,
+        int(feature_cache["crop_ids"].numel()),
+    )
 
 if __name__ == "__main__":
     main()

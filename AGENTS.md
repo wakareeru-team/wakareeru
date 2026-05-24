@@ -14,6 +14,7 @@
 - 不要把一次性运行结果、当前样本数、临时实验结论、具体模型分数等易过期信息写进本文件；这类信息应放在 docs、notebook、review 文件或实验记录里。
 - `data/` 下通常包含生成数据、缓存、图片和 SQLite 数据库。除非用户明确要求，不要清理、重建或覆盖这些文件。
 - 构建pipeline时注意将易修改配置放入config，而把较为固定的常量放入constants.py。在笔记本实验阶段不需要这么做
+- pipeline 正式脚本读取运行配置时不要在代码里用 `.get(..., 默认值)` 静默兜底；新增或依赖配置项应写入 `config/pipeline_config.yaml`，缺失时直接报错，避免隐藏硬编码默认值。
 
 ## 稳定目标与建模方向
 
@@ -148,7 +149,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `llm_labeling.*` 控制 OpenAI 元数据抽取，包括是否为 Responses API 启用 `web_search` 工具。
 - `fine_grain_series.*` 控制细粒度车型标签规则。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
-- `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验。
+- `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
 
 ## 维护边界

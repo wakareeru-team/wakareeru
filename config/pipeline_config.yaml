@@ -103,6 +103,7 @@ noise_detection:
   crop_pad_frac: 0.04
 
   feature_extraction_batch_size: 16
+  feature_cache_shard_size: 1024
   extration_workers: 4
   linear_head_train_batch_size: 32
   feature_cache_dir: "feature_cache"
