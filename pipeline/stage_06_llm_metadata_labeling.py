@@ -91,6 +91,29 @@ def request_details_batch(
     raise RuntimeError(f"Details LLM failed after retries: {last_error}")
 
 
+def load_llm_details_checkpoint(details_path) -> pd.DataFrame:
+    if not details_path.exists():
+        return pd.DataFrame()
+    details = pd.read_csv(details_path, dtype={"bandai": str})
+    if "category_path_json" not in details.columns:
+        raise ValueError(f"checkpoint missing category_path_json: {details_path}")
+    return details.drop_duplicates("category_path_json", keep="last").reset_index(drop=True)
+
+
+def append_llm_details_checkpoint(details_path, existing_details: pd.DataFrame, new_rows: list[dict]) -> pd.DataFrame:
+    if not new_rows:
+        return existing_details
+    new_details = pd.DataFrame(new_rows)
+    if existing_details.empty:
+        merged = new_details
+    else:
+        merged = pd.concat([existing_details, new_details], ignore_index=True)
+    merged = merged.drop_duplicates("category_path_json", keep="last").reset_index(drop=True)
+    details_path.parent.mkdir(parents=True, exist_ok=True)
+    merged.to_csv(details_path, index=False)
+    return merged
+
+
 
 def main(config: dict | None = None):
     if config is None:
@@ -111,6 +134,10 @@ def main(config: dict | None = None):
     tool_choice = llm_config["web_search_tool_choice"] if tools else None
     if tools:
         logger.info("LLM metadata labeling 已启用 OpenAI web_search tool: %s", tools)
+    details_path = utils.join_data_root(
+        config["path"]["llm_category_details_path"],
+        config=config,
+    )
 
     with sqlite3.connect(db_path) as conn:
         category_paths = pd.read_sql_query("""
@@ -119,10 +146,24 @@ def main(config: dict | None = None):
                                     GROUP BY category_path_json
                                     """, conn)
     logger.info(f"共发现 {len(category_paths)} 条唯一的 category_path，准备进行LLM解析...")
+
+    llm_details = load_llm_details_checkpoint(details_path)
+    completed_paths = (
+        set(llm_details["category_path_json"].astype(str))
+        if not llm_details.empty
+        else set()
+    )
+    pending_category_paths = category_paths[
+        ~category_paths["category_path_json"].astype(str).isin(completed_paths)
+    ].reset_index(drop=True)
+    logger.info(
+        "LLM checkpoint: 已完成 %d 条；待处理 %d 条。",
+        len(completed_paths),
+        len(pending_category_paths),
+    )
     
-    llm_details_rows = []
-    with tqdm(total=len(category_paths), desc="LLM metadata labeling", unit="path") as pbar:
-        for batch in batched(category_paths.itertuples(index=False), batch_size):
+    with tqdm(total=len(pending_category_paths), desc="LLM metadata labeling", unit="path") as pbar:
+        for batch in batched(pending_category_paths.itertuples(index=False), batch_size):
             # Send parsed category_path lists, not raw JSON strings, so the prompt is cleaner.
             batch_dict = [
                 {"category_path": json.loads(row.category_path_json)}
@@ -139,23 +180,24 @@ def main(config: dict | None = None):
                 tool_choice=tool_choice,
             )
 
+            batch_rows = []
             for row, detail in zip(batch, batch_details):
                 detail["category_path_json"] = row.category_path_json
                 detail["category_path"] = json.loads(row.category_path_json)
-                llm_details_rows.append(detail)
+                batch_rows.append(detail)
 
+            llm_details = append_llm_details_checkpoint(details_path, llm_details, batch_rows)
             pbar.update(len(batch_details))
-            logger.info(f"已处理: {len(llm_details_rows)}/{len(category_paths)} category paths.")
+            logger.info(
+                "已处理: %d/%d pending category paths；checkpoint 总计 %d 条。",
+                pbar.n,
+                len(pending_category_paths),
+                len(llm_details),
+            )
 
-
-    llm_details = pd.DataFrame(llm_details_rows)
-    
-    details_path = utils.join_data_root(
-        config["path"]["llm_category_details_path"],
-        config=config,
-    )
-    details_path.parent.mkdir(parents=True, exist_ok=True)
-    llm_details.to_csv(details_path, index=False)
+    if llm_details.empty:
+        logger.warning("没有可回写的 LLM metadata，跳过数据库更新。")
+        return
 
     
         # 将 category details 回写到 images 表。幂等。

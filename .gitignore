@@ -225,3 +225,4 @@ data/*.csv
 data/model
 data/feature_cache
 data/review
+data/dataset
