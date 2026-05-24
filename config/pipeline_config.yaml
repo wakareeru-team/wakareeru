@@ -63,7 +63,7 @@ llm_labeling:
   max_retries: 3
   openai_model_name: "gpt-5.4-mini"
   web_search_enabled: true
-  reasong_effort: "low" # "none" | "low" | "high"，reasoning effort越高，模型在做判断时需要提供的理由越详细，能提升准确率但也会增加成本和响应时间。
+  reasoning_effort: "low" # "none" | "low" | "high"，reasoning effort越高，模型在做判断时需要提供的理由越详细，能提升准确率但也会增加成本和响应时间。
   web_search_context_size: "low"
   web_search_tool_choice: "auto"
 

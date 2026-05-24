@@ -7,13 +7,10 @@ import utils
 import pandas as pd
 import time
 from openai import OpenAI
+from tqdm.auto import tqdm
 
 config = utils.load_pipeline_config()
 logger = utils.get_logger("stage_06_llm_metadata_labeling")
-
-BATCH_SIZE_DETAILS = 5
-MAX_DETAILS_RETRIES = 3
-
 
 def _as_bool(value, default: bool = False) -> bool:
     if value is None:
@@ -57,21 +54,23 @@ def request_details_batch(
     openai_client,
     openai_model_name,
     system_prompt,
+    effort,
     batch_dict: list[dict],
+    max_retries: int,
     tools: list[dict] | None = None,
     tool_choice: str | None = None,
 ) -> list[dict]:
     """Analyze one category_path batch; retry when JSON is invalid or count mismatches."""
     batch_str = json.dumps(batch_dict, ensure_ascii=False)
     last_error = None
-    for attempt in range(1, MAX_DETAILS_RETRIES + 1):
+    for attempt in range(1, max_retries + 1):
         request_kwargs = {
             "model": openai_model_name,
             "input": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": batch_str},
             ],
-            "reasoning": {"effort": "medium"},
+            "reasoning": {"effort": effort},
         }
         if tools:
             request_kwargs["tools"] = tools
@@ -86,7 +85,7 @@ def request_details_batch(
             return details
         except (json.JSONDecodeError, ValueError) as exc:
             last_error = exc
-            print(f"details JSON failed ({attempt}/{MAX_DETAILS_RETRIES}): {exc}")
+            print(f"details JSON failed ({attempt}/{max_retries}): {exc}")
             print((response.output_text or "")[:500])
             time.sleep(1)
     raise RuntimeError(f"Details LLM failed after retries: {last_error}")
@@ -99,6 +98,9 @@ def main(config: dict | None = None):
     utils.init_db(config=config)
     llm_config = config["llm_labeling"]
     OPENAI_MODEL_NAME = llm_config["openai_model_name"]
+    effort = llm_config['reasoning_effort']
+    batch_size = int(llm_config["batch_size"])
+    max_retries = int(llm_config["max_retries"])
     if os.environ.get("OPENAI_API_KEY") is None:
         logger.error("没有设置 OPENAI_API_KEY 环境变量，无法继续执行 LLM 相关的步骤。请设置环境变量后重试。")
         return
@@ -119,27 +121,31 @@ def main(config: dict | None = None):
     logger.info(f"共发现 {len(category_paths)} 条唯一的 category_path，准备进行LLM解析...")
     
     llm_details_rows = []
-    for batch in batched(category_paths.itertuples(index=False), BATCH_SIZE_DETAILS):
-        # Send parsed category_path lists, not raw JSON strings, so the prompt is cleaner.
-        batch_dict = [
-            {"category_path": json.loads(row.category_path_json)}
-            for row in batch
-        ]
-        batch_details = request_details_batch(
-            openai_client,
-            OPENAI_MODEL_NAME,
-            constants.LLM_LABEL_DETAIL_PROMPT,
-            batch_dict,
-            tools=tools,
-            tool_choice=tool_choice,
-        )
+    with tqdm(total=len(category_paths), desc="LLM metadata labeling", unit="path") as pbar:
+        for batch in batched(category_paths.itertuples(index=False), batch_size):
+            # Send parsed category_path lists, not raw JSON strings, so the prompt is cleaner.
+            batch_dict = [
+                {"category_path": json.loads(row.category_path_json)}
+                for row in batch
+            ]
+            batch_details = request_details_batch(
+                openai_client,
+                OPENAI_MODEL_NAME,
+                constants.LLM_LABEL_DETAIL_PROMPT,
+                effort,
+                batch_dict,
+                max_retries=max_retries,
+                tools=tools,
+                tool_choice=tool_choice,
+            )
 
-        for row, detail in zip(batch, batch_details):
-            detail["category_path_json"] = row.category_path_json
-            detail["category_path"] = json.loads(row.category_path_json)
-            llm_details_rows.append(detail)
+            for row, detail in zip(batch, batch_details):
+                detail["category_path_json"] = row.category_path_json
+                detail["category_path"] = json.loads(row.category_path_json)
+                llm_details_rows.append(detail)
 
-        logger.info(f"已处理: {len(llm_details_rows)}/{len(category_paths)} category paths.")
+            pbar.update(len(batch_details))
+            logger.info(f"已处理: {len(llm_details_rows)}/{len(category_paths)} category paths.")
 
 
     llm_details = pd.DataFrame(llm_details_rows)
