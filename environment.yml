@@ -4,20 +4,31 @@ channels:
   - defaults
 dependencies:
   - python=3.12
+  - pip
   - ipykernel
   - ipywidgets
   - numpy
   - pandas
   - matplotlib
   - scikit-learn
+  - joblib
   - pillow
-  - httpx
   - requests
+  - httpx
+  - h2
+  - beautifulsoup4
+  - lxml
+  - aiofiles
+  - tenacity
+  - rich
   - python-dotenv
   - tqdm
+  - pyyaml
   - gradio
-  - scikit-learn
-  - joblib
+  - pytest
+  - pytest-asyncio
+  - ruff
+  - mypy
   - pip:
       - accelerate
       - huggingface-hub
@@ -25,4 +36,3 @@ dependencies:
       - torch
       - torchvision
       - transformers
-      - pyyaml
