@@ -88,6 +88,7 @@ python tools/noise_review_gradio.py
 从人工复核 CSV 导入 review overlay（路径相对 `path.data_root` 解析，用 stable key + bbox IoU 匹配，不依赖自增 id）：
 
 ```bash
+python tools/export_noise_review_csv.py --output-csv-path review/noise_review_labels.csv
 python tools/import_noise_review_csv.py --review-csv-path review/noise_review_labels.csv
 ```
 
