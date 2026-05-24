@@ -25,13 +25,16 @@ crawler:
   # However, shared series with other operators will still be included 
   # even if the operator is not active.
   active_operators: ["JR東日本", "JR貨物"]
-  full_series_crawling: false
+  full_series_crawling: true
   manifest_max_files_per_category: 50
   # 0 = only root category; positive numbers recurse into subcategories; -1 = unlimited.
-  manifest_max_depth: 4
+  manifest_max_depth: 5
   # false = skip category file manifests already marked ok in the DB; true = overwrite crawl them.
   manifest_reprocess: false
   download_batch_size: 500
+  # Keep this at 3 or lower for Wikimedia etiquette unless you have a stronger reason.
+  download_workers: 1
+  download_request_interval: 0.3
   # -1 = no cap; positive numbers download at most that many pending rows.
   download_total_limit: -1
   download_retry_failed: true
@@ -60,7 +63,7 @@ llm_labeling:
   max_retries: 3
   openai_model_name: "gpt-5.4-mini"
   web_search_enabled: true
-  web_search_context_size: "low"
+  web_search_context_size: "medium"
   web_search_tool_choice: "auto"
 
 
@@ -95,7 +98,7 @@ noise_detection:
   # 选项: "series" | "fine_grained_series" | "submodel"
   label_granularity: "fine_grained_series"
   hf_model_name: "facebook/dinov3-vits16-pretrain-lvd1689m"
-  full_series: false
+  full_series: true
   series_test_scope: ["E231系", "キハ40系", "EF510形", "DD51形", "C57形", "キハ141系","E233系", "E353系", "E657系", "E5系", "E6系", "EF64形", "E7系",'EF81形','E235系','キハ110系',
         '113系','485系','E217系','E257系']
   

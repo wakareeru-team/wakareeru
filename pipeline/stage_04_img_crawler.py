@@ -5,6 +5,7 @@ import re
 import sqlite3
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Mapping
 from urllib.parse import unquote
 
@@ -60,13 +61,13 @@ def _download_retry_sleep(attempt: int, response: httpx.Response | None = None) 
 
 def download_one_image(
     record: Mapping[str, Any],
-    conn: sqlite3.Connection,
     img_root: str | os.PathLike = IMG_ROOT,
     data_root: str | os.PathLike | None = None,
     max_retries: int = 3,
+    request_interval: float = 0.1,
 ) -> dict:
-    """Download one manifest image, retry transient failures, and update SQLite."""
-    time.sleep(0.3)
+    """Download one manifest image and return the SQLite update payload."""
+    time.sleep(request_interval)
     image_url = record.get("image_url")
     error = None
     if not image_url:
@@ -79,6 +80,7 @@ def download_one_image(
             status = constants.DOWNLOAD_STATUS_DOWNLOADED
         else:
             status = constants.DOWNLOAD_STATUS_FAILED
+            temp_path = f"{abs_path}.part.{record['id']}"
             for attempt in range(max_retries + 1):
                 try:
                     with httpx.stream(
@@ -89,14 +91,17 @@ def download_one_image(
                         follow_redirects=True,
                     ) as resp:
                         resp.raise_for_status()
-                        with open(abs_path, "wb") as f:
+                        with open(temp_path, "wb") as f:
                             for chunk in resp.iter_bytes():
                                 if chunk:
                                     f.write(chunk)
+                    os.replace(temp_path, abs_path)
                     status, error = constants.DOWNLOAD_STATUS_DOWNLOADED, None
                     break
 
                 except httpx.HTTPStatusError as exc:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
                     code = exc.response.status_code
                     error = f"HTTP {code}: {exc.response.reason_phrase}"
                     retryable = code in {429, 502, 503, 504}
@@ -117,6 +122,8 @@ def download_one_image(
                     break
 
                 except httpx.HTTPError as exc:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
                     error = f"{type(exc).__name__}: {exc}"
                     if attempt < max_retries:
                         sleep_s = _download_retry_sleep(attempt)
@@ -134,15 +141,26 @@ def download_one_image(
                     rel_path = None
                     break
 
-    conn.execute(
+    return {
+        "id": record["id"],
+        "file_title": record["file_title"],
+        "status": status,
+        "path": rel_path,
+        "error": error,
+    }
+
+
+def _update_download_results(conn: sqlite3.Connection, results: list[dict]) -> None:
+    if not results:
+        return
+    conn.executemany(
         """
         UPDATE images
         SET download_status = ?, downloaded_path = ?
         WHERE id = ?
         """,
-        (status, rel_path, record["id"]),
+        [(result["status"], result["path"], result["id"]) for result in results],
     )
-    return {"file_title": record["file_title"], "status": status, "path": rel_path, "error": error}
 
 
 def _pending_download_where(retry_failed: bool) -> tuple[str, tuple[str]]:
@@ -196,13 +214,19 @@ def _fetch_pending_download_batch(
 def _append_download_log(log_path: str, rows: list[dict]) -> None:
     if not rows:
         return
-    fieldnames = ["file_title", "status", "path", "error"]
+    fieldnames = ["id", "file_title", "status", "path", "error"]
     write_header = not os.path.exists(log_path)
     log_dir = os.path.dirname(log_path)
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
+    if not write_header:
+        with open(log_path, newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            existing_header = next(reader, None)
+        if existing_header:
+            fieldnames = existing_header
     with open(log_path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         if write_header:
             writer.writeheader()
         writer.writerows(rows)
@@ -227,6 +251,8 @@ def batch_download_manifest_from_db(
     retry_failed: bool = True,
     log_path: str | None = None,
     max_retries: int = 3,
+    workers: int = 1,
+    request_interval: float = 0.1,
 ) -> dict[str, int]:
     """Download pending images in fixed-size DB batches with tqdm progress."""
     counts: Counter[str] = Counter()
@@ -252,22 +278,29 @@ def batch_download_manifest_from_db(
                 if not rows:
                     break
 
+                last_id = max(last_id, max(int(record["id"]) for record in rows))
                 results = []
-                for record in rows:
-                    last_id = max(last_id, int(record["id"]))
-                    result = download_one_image(
-                        record,
-                        conn,
-                        img_root=img_root,
-                        data_root=data_root,
-                        max_retries=max_retries,
-                    )
-                    results.append(result)
-                    counts[result["status"]] += 1
-                    processed += 1
-                    pbar.update(1)
-                    pbar.set_postfix(dict(counts))
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = [
+                        executor.submit(
+                            download_one_image,
+                            record,
+                            img_root=img_root,
+                            data_root=data_root,
+                            max_retries=max_retries,
+                            request_interval=request_interval,
+                        )
+                        for record in rows
+                    ]
+                    for future in as_completed(futures):
+                        result = future.result()
+                        results.append(result)
+                        counts[result["status"]] += 1
+                        processed += 1
+                        pbar.update(1)
+                        pbar.set_postfix(dict(counts))
 
+                _update_download_results(conn, results)
                 conn.commit()
                 if log_path:
                     _append_download_log(log_path, results)
@@ -283,8 +316,8 @@ def main(config: dict | None = None):
     data_root = utils.get_data_root(config)
     os.makedirs(img_root, exist_ok=True)
 
-    crawler_config = config.get("crawler", {})
-    log_path = config['path'].get("img_crawl_log_path")
+    crawler_config = config["crawler"]
+    log_path = config["path"]["img_crawl_log_path"]
     if log_path:
         log_path = utils.join_data_root(log_path, config=config)
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
@@ -295,9 +328,11 @@ def main(config: dict | None = None):
         data_root=data_root,
         batch_size=int(crawler_config["download_batch_size"]),
         total_limit=int(crawler_config["download_total_limit"]),
-        retry_failed=_as_bool(crawler_config["download_retry_failed"], default=True),
+        retry_failed=_as_bool(crawler_config["download_retry_failed"]),
         log_path=log_path,
-        max_retries=int(crawler_config.get("download_max_retries", 3)),
+        max_retries=int(crawler_config["download_max_retries"]),
+        workers=int(crawler_config["download_workers"]),
+        request_interval=float(crawler_config["download_request_interval"]),
     )
     logger.info("下载结果: %s", result)
 
