@@ -61,6 +61,8 @@ pip install -e ".[dev]"
 cp .env.example .env
 ```
 
+RunPod 等 GPU 镜像若已经内置 PyTorch/torchvision，可用 `requirements-runpod.txt` 安装运行依赖；该文件刻意不包含 `torch`/`torchvision`，避免覆盖镜像自带 CUDA 版本。
+
 运行完整管线：
 
 ```bash

@@ -72,6 +72,13 @@ conda activate wakareeru
 pip install -e ".[dev]"
 ```
 
+RunPod 等 GPU 镜像若已经内置 PyTorch/torchvision，可安装轻量运行依赖：
+
+```bash
+pip install -r requirements-runpod.txt
+pip install -e .
+```
+
 如果需要运行 LLM 元数据阶段，请配置 OpenAI API Key：
 
 ```bash

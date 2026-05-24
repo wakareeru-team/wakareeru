@@ -1,0 +1,25 @@
+# RunPod / GPU image requirements for Wakareeru.
+# The base image is expected to already provide torch and torchvision.
+
+accelerate>=0.34
+aiofiles>=23.0
+beautifulsoup4>=4.12
+gradio>=4.44
+h2>=4.1
+huggingface-hub>=0.24
+httpx[http2]>=0.27
+joblib>=1.4
+lxml>=5.0
+matplotlib>=3.8
+numpy>=1.26
+openai>=1.99
+pandas>=2.2
+pillow>=10.0
+python-dotenv>=1.0
+pyyaml>=6.0
+requests>=2.31
+rich>=13.0
+scikit-learn>=1.4
+tenacity>=8.2
+tqdm>=4.66
+transformers>=4.45
