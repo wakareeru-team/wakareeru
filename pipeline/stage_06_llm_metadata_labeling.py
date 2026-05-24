@@ -15,6 +15,27 @@ BATCH_SIZE_DETAILS = 5
 MAX_DETAILS_RETRIES = 3
 
 
+def _as_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def build_web_search_tools(llm_config: dict) -> list[dict]:
+    if not _as_bool(llm_config.get("web_search_enabled"), default=False):
+        return []
+
+    tool = {"type": "web_search"}
+    context_size = llm_config.get("web_search_context_size")
+    if context_size:
+        tool["search_context_size"] = str(context_size)
+    return [tool]
+
+
 
 
 def parse_llm_json_array(text: str) -> list[dict]:
@@ -32,19 +53,32 @@ def parse_llm_json_array(text: str) -> list[dict]:
     return data
 
 
-def request_details_batch(openai_client, openai_model_name, system_prompt, batch_dict: list[dict]) -> list[dict]:
+def request_details_batch(
+    openai_client,
+    openai_model_name,
+    system_prompt,
+    batch_dict: list[dict],
+    tools: list[dict] | None = None,
+    tool_choice: str | None = None,
+) -> list[dict]:
     """Analyze one category_path batch; retry when JSON is invalid or count mismatches."""
     batch_str = json.dumps(batch_dict, ensure_ascii=False)
     last_error = None
     for attempt in range(1, MAX_DETAILS_RETRIES + 1):
-        response = openai_client.responses.create(
-            model=openai_model_name,
-            input=[
+        request_kwargs = {
+            "model": openai_model_name,
+            "input": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": batch_str},
             ],
-            reasoning={"effort": "low"},
-        )
+            "reasoning": {"effort": "medium"},
+        }
+        if tools:
+            request_kwargs["tools"] = tools
+            if tool_choice:
+                request_kwargs["tool_choice"] = tool_choice
+
+        response = openai_client.responses.create(**request_kwargs)
         try:
             details = parse_llm_json_array(response.output_text)
             if len(details) != len(batch_dict):
@@ -63,13 +97,18 @@ def main(config: dict | None = None):
     if config is None:
         config = utils.load_pipeline_config()
     utils.init_db(config=config)
-    OPENAI_MODEL_NAME = config["llm_labeling"]["openai_model_name"]
+    llm_config = config["llm_labeling"]
+    OPENAI_MODEL_NAME = llm_config["openai_model_name"]
     if os.environ.get("OPENAI_API_KEY") is None:
         logger.error("没有设置 OPENAI_API_KEY 环境变量，无法继续执行 LLM 相关的步骤。请设置环境变量后重试。")
         return
     
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     openai_client = OpenAI()
+    tools = build_web_search_tools(llm_config)
+    tool_choice = llm_config.get("web_search_tool_choice") if tools else None
+    if tools:
+        logger.info("LLM metadata labeling 已启用 OpenAI web_search tool: %s", tools)
 
     with sqlite3.connect(db_path) as conn:
         category_paths = pd.read_sql_query("""
@@ -86,7 +125,14 @@ def main(config: dict | None = None):
             {"category_path": json.loads(row.category_path_json)}
             for row in batch
         ]
-        batch_details = request_details_batch(openai_client, OPENAI_MODEL_NAME, constants.LLM_LABEL_DETAIL_PROMPT, batch_dict)
+        batch_details = request_details_batch(
+            openai_client,
+            OPENAI_MODEL_NAME,
+            constants.LLM_LABEL_DETAIL_PROMPT,
+            batch_dict,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
 
         for row, detail in zip(batch, batch_details):
             detail["category_path_json"] = row.category_path_json

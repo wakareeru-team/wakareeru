@@ -145,7 +145,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `crawler.active_operators` 控制当前纳入的数据范围。
 - `crawler.manifest_max_depth`、`manifest_max_files_per_category` 控制 Commons 分类递归与每分类文件上限；`crawler.manifest_reprocess` 控制是否忽略 category checkpoint 并覆盖重爬 manifest。
 - `image_filtering.*` 控制 SigLIP2 图片过滤。
-- `llm_labeling.*` 控制 OpenAI 元数据抽取。
+- `llm_labeling.*` 控制 OpenAI 元数据抽取，包括是否为 Responses API 启用 `web_search` 工具。
 - `fine_grain_series.*` 控制细粒度车型标签规则。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验。

@@ -59,6 +59,9 @@ llm_labeling:
   batch_size: 5
   max_retries: 3
   openai_model_name: "gpt-5.4-mini"
+  web_search_enabled: true
+  web_search_context_size: "low"
+  web_search_tool_choice: "auto"
 
 
 # GDINO bbox detection and post-processing configuration
