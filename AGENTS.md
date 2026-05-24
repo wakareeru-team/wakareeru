@@ -85,6 +85,12 @@ python pipeline_entry.py --from manifest_crawling
 python tools/noise_review_gradio.py
 ```
 
+从人工复核 CSV 导入 review overlay（路径相对 `path.data_root` 解析，用 stable key + bbox IoU 匹配，不依赖自增 id）：
+
+```bash
+python tools/import_noise_review_csv.py --review-csv-path review/noise_review_labels.csv
+```
+
 开发检查：
 
 ```bash
@@ -137,7 +143,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `images.download_status`：`not_started`、`downloaded`、`failed`、`missing_url`。
 - `images.downloaded_path`：相对 `path.data_root` 的图片路径，通常形如 `img/<series>/<file>`。
 - `crops.crop_status`：`pending`、`ok`、`rejected`。
-- `crops.noise_score_v1` 与 `noise_review_*`：Small Loss Trick / 人工复核相关字段。
+- `crops.noise_score_v1` 与 `noise_review_*`：Small Loss Trick / 人工复核相关字段；跨机器迁移人工复核结果时使用 `tools/import_noise_review_csv.py` 显式导入，不作为默认 pipeline stage。
 
 ## 配置要点
 

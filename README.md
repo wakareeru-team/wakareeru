@@ -104,6 +104,12 @@ python pipeline_entry.py --from manifest_crawling
 python tools/noise_review_gradio.py
 ```
 
+导入人工复核 CSV（路径相对 `path.data_root` 解析，使用 stable key + bbox IoU 匹配）：
+
+```bash
+python tools/import_noise_review_csv.py --review-csv-path review/noise_review_labels.csv
+```
+
 可用阶段包括：
 
 | Stage | 说明 |
