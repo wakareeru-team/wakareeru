@@ -2,6 +2,8 @@ import csv
 import os
 import sqlite3
 from collections import Counter
+
+from PIL import Image, UnidentifiedImageError
 from tqdm.auto import tqdm
 
 import constants
@@ -87,6 +89,15 @@ def _image_abs_path(downloaded_path: str, config: dict | None = None) -> str:
     return str(utils.join_data_root(str(downloaded_path).replace("\\", "/"), config=config))
 
 
+def _is_supported_raster_image(path: str) -> bool:
+    try:
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except (UnidentifiedImageError, OSError):
+        return False
+
+
 def _updates_from_outputs(rows: list[dict], outputs: list, threshold: float) -> tuple[list[tuple], list[dict]]:
     update_rows = []
     log_rows = []
@@ -169,16 +180,37 @@ def batch_siglip_classification(
                 ]
                 existing_ids = {row["id"] for row in existing_rows}
                 missing_rows = [row for row in rows if row["id"] not in existing_ids]
+                valid_rows = [
+                    row for row in existing_rows
+                    if _is_supported_raster_image(_image_abs_path(row["downloaded_path"], config=config))
+                ]
+                valid_ids = {row["id"] for row in valid_rows}
+                invalid_rows = [row for row in existing_rows if row["id"] not in valid_ids]
 
                 if missing_rows:
                     for row in missing_rows:
                         logger.warning("Missing file, skipping: id=%d %s", row["id"], row["downloaded_path"])
                     counts["missing_file"] += len(missing_rows)
 
-                if existing_rows:
-                    paths = [_image_abs_path(row["downloaded_path"], config=config) for row in existing_rows]
+                if invalid_rows:
+                    for row in invalid_rows:
+                        logger.warning("Unsupported image, excluding: id=%d %s", row["id"], row["downloaded_path"])
+                    conn.executemany(
+                        """
+                        UPDATE images
+                        SET excluded = 1,
+                            exclude_reason = ?,
+                            siglip_processed = 1
+                        WHERE id = ?
+                        """,
+                        [("unsupported_image", row["id"]) for row in invalid_rows],
+                    )
+                    counts["unsupported_image"] += len(invalid_rows)
+
+                if valid_rows:
+                    paths = [_image_abs_path(row["downloaded_path"], config=config) for row in valid_rows]
                     outputs = image_classifier(paths, SIGLIP_VIEW_CANDIDATES)
-                    update_rows, log_rows = _updates_from_outputs(existing_rows, outputs, threshold)
+                    update_rows, log_rows = _updates_from_outputs(valid_rows, outputs, threshold)
                     conn.executemany(
                         """
                         UPDATE images

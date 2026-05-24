@@ -262,7 +262,7 @@ def build_image_records(
 # =============== MIME类型过滤 ===============
 
 def purge_non_image_manifest_records(conn: sqlite3.Connection) -> int:
-    """Delete existing DB rows whose MIME is missing or not an image/* type."""
+    """Delete existing DB rows whose MIME is missing or not supported raster image data."""
     conn.execute(
         """
         DELETE FROM image_categories
@@ -271,12 +271,19 @@ def purge_non_image_manifest_records(conn: sqlite3.Connection) -> int:
             FROM images
             WHERE images.file_title = image_categories.file_title
               AND images.category = image_categories.category
-              AND LOWER(COALESCE(images.mime, '')) NOT LIKE 'image/%'
+              AND (
+                  LOWER(COALESCE(images.mime, '')) NOT LIKE 'image/%'
+                  OR LOWER(COALESCE(images.mime, '')) = 'image/svg+xml'
+              )
         )
         """
     )
     deleted = conn.execute(
-        "DELETE FROM images WHERE LOWER(COALESCE(mime, '')) NOT LIKE 'image/%'"
+        """
+        DELETE FROM images
+        WHERE LOWER(COALESCE(mime, '')) NOT LIKE 'image/%'
+           OR LOWER(COALESCE(mime, '')) = 'image/svg+xml'
+        """
     ).rowcount
     conn.commit()
     return deleted
@@ -288,7 +295,12 @@ def apply_mime_filter_to_manifest_db(db_path: str = IMAGE_DB_PATH) -> dict[str, 
     try:
         before = conn.execute("SELECT COUNT(*) FROM images").fetchone()[0]
         non_image = conn.execute(
-            "SELECT COUNT(*) FROM images WHERE LOWER(COALESCE(mime, '')) NOT LIKE 'image/%'"
+            """
+            SELECT COUNT(*)
+            FROM images
+            WHERE LOWER(COALESCE(mime, '')) NOT LIKE 'image/%'
+               OR LOWER(COALESCE(mime, '')) = 'image/svg+xml'
+            """
         ).fetchone()[0]
         deleted = purge_non_image_manifest_records(conn)
         after = conn.execute("SELECT COUNT(*) FROM images").fetchone()[0]
