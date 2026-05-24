@@ -10,6 +10,9 @@ import pandas as pd
 import ast
 import sqlite3
 from datetime import datetime, timezone
+
+from tqdm.auto import tqdm
+
 import constants
 import utils
 
@@ -361,6 +364,25 @@ def upsert_image_records(
         )
     conn.commit()
 
+
+def get_category_fetch_status(conn: sqlite3.Connection, category: str) -> str | None:
+    row = conn.execute(
+        "SELECT fetch_status FROM categories WHERE category = ?",
+        (category,),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def should_fetch_category_files(
+    conn: sqlite3.Connection,
+    category: str,
+    reprocess: bool = False,
+) -> bool:
+    """Return whether the direct file manifest for one category should be crawled."""
+    if reprocess:
+        return True
+    return get_category_fetch_status(conn, category) != constants.FETCH_STATUS_OK
+
 # ================== Manifest Crawling 流程 ==================
 
 def should_skip_category(row: pd.Series, category: str) -> str | None:
@@ -409,12 +431,85 @@ def collect_category_records(
     return records
 
 
+def crawl_category_records_with_checkpoint(
+    conn: sqlite3.Connection,
+    row: pd.Series,
+    category: str,
+    path: list[str],
+    depth: int,
+    max_depth: int,
+    max_files_per_category: int,
+    visited_paths: set[tuple[str, ...]],
+    reprocess: bool = False,
+) -> list[dict]:
+    """Crawl one category subtree, skipping already fetched category file manifests.
+
+    The checkpoint is category-local: an ``ok`` category skips only direct file
+    fetching for that category. Subcategories are still discovered and visited so
+    a previous interrupted run can resume inside a partially processed subtree.
+    """
+    path_key = tuple(path)
+    if path_key in visited_paths:
+        return []
+    visited_paths.add(path_key)
+
+    records: list[dict] = []
+    source_scope = (
+        constants.CATEGORY_SOURCE_SCOPE_ROOT
+        if len(path) == 1
+        else constants.CATEGORY_SOURCE_SCOPE_RECURSIVE
+    )
+    parent_category = path[-2] if len(path) > 1 else None
+
+    if should_fetch_category_files(conn, category, reprocess=reprocess):
+        category_records = build_image_records(
+            row,
+            category,
+            max_files=max_files_per_category,
+            category_path=path,
+        )
+        upsert_image_records(
+            conn,
+            category,
+            category_records,
+            source_scope=source_scope,
+            parent_category=parent_category,
+        )
+        records.extend(category_records)
+        logger.info("depth=%d Category:%s -> %d 个文件", depth, category, len(category_records))
+    else:
+        logger.info("depth=%d Category:%s -> 已有 checkpoint，跳过直接文件 manifest", depth, category)
+
+    if max_depth != -1 and depth >= max_depth:
+        return records
+
+    subcats = fetch_subcategories(category) or []
+    for subcat in subcats:
+        if should_skip_category(row, subcat):
+            continue
+        records.extend(
+            crawl_category_records_with_checkpoint(
+                conn=conn,
+                row=row,
+                category=subcat,
+                path=path + [subcat],
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_files_per_category=max_files_per_category,
+                visited_paths=visited_paths,
+                reprocess=reprocess,
+            )
+        )
+    return records
+
+
 def crawl_root_manifest_sample(
     sample_series: list[str] | None = None,
     max_files_per_category: int = 40,
     max_depth: int = -1, # -1:不设上限
     db_path: str = IMAGE_DB_PATH,
     models: pd.DataFrame | None = None,
+    reprocess: bool = False,
 ) -> pd.DataFrame:
     """Crawl manifest records for selected series; max_depth=0 means root only."""
     models = load_commons_models() if models is None else models
@@ -428,9 +523,10 @@ def crawl_root_manifest_sample(
     all_records = []
     try:
         logger.info("准备爬取 manifest：%d 个车型", len(sample))
-        for _, row in sample.iterrows():
+        for _, row in tqdm(sample.iterrows(), total=len(sample), desc="Manifest series", unit="series"):
             root_category = row["commons_root_category"]
-            records = collect_category_records(
+            records = crawl_category_records_with_checkpoint(
+                conn=conn,
                 row=row,
                 category=root_category,
                 path=[root_category],
@@ -438,48 +534,11 @@ def crawl_root_manifest_sample(
                 max_depth=max_depth,
                 max_files_per_category=max_files_per_category,
                 visited_paths=set(),
+                reprocess=reprocess,
             )
 
-            records_df = pd.DataFrame(records)
-            if not records_df.empty:
-                # Write one category at a time so each category can keep its own source_scope.
-                for category, group in records_df.groupby("category", sort=False):
-                    first_path = json.loads(group.iloc[0]["category_path_json"])
-                    source_scope = (
-                        constants.CATEGORY_SOURCE_SCOPE_ROOT
-                        if len(first_path) == 1
-                        else constants.CATEGORY_SOURCE_SCOPE_RECURSIVE
-                    )
-                    parent_category = first_path[-2] if len(first_path) > 1 else None
-                    # Compatible with older notebook kernels where upsert_image_records
-                    # was defined before parent_category existed. Re-run the write helper
-                    # cell when possible; this fallback keeps interactive testing moving.
-                    try:
-                        upsert_image_records(
-                            conn,
-                            category, # type: ignore
-                            group.to_dict("records"),
-                            source_scope=source_scope,
-                            parent_category=parent_category,
-                        )
-                    except TypeError as exc:
-                        if "parent_category" not in str(exc):
-                            raise
-                        upsert_image_records(
-                            conn,
-                            category, #type: ignore
-                            group.to_dict("records"),
-                            source_scope=source_scope,
-                        )
-                        if parent_category:
-                            conn.execute(
-                                "UPDATE categories SET parent_category = COALESCE(parent_category, ?) WHERE category = ?",
-                                (parent_category, category),
-                            )
-                            conn.commit()
-
             all_records.extend(records)
-            logger.info('%s：Category:%s -> 共 %d 个文件', row["series"], root_category, len(records))
+            logger.info('%s：Category:%s -> 本次新增/更新 %d 个文件', row["series"], root_category, len(records))
 
         purged = purge_non_image_manifest_records(conn)
         logger.info('MIME 过滤已从 manifest 数据库移除 %d 条非图片记录', purged)
@@ -512,12 +571,14 @@ def main(config_override=None):
 
     max_files_per_category = int(crawler_config.get("manifest_max_files_per_category", 50))
     max_depth = int(crawler_config.get("manifest_max_depth", 4))
+    reprocess = _as_bool(crawler_config.get("manifest_reprocess"), default=False)
     logger.info(
-        "Manifest 爬取模式：%s；车型数：%d；每个分类最多文件数：%d；递归深度：%d",
+        "Manifest 爬取模式：%s；车型数：%d；每个分类最多文件数：%d；递归深度：%d；覆盖重爬：%s",
         scope_name,
         len(selected_models),
         max_files_per_category,
         max_depth,
+        reprocess,
     )
 
     if selected_models.empty:
@@ -530,6 +591,7 @@ def main(config_override=None):
         max_depth=max_depth,
         db_path=db_path,
         models=selected_models,
+        reprocess=reprocess,
     )
     logger.info("本次 manifest 爬取获得 %d 条原始记录", len(sample_manifest))
 

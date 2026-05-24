@@ -143,7 +143,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `path.in_project_root` 与 `path.data_root` 控制生成数据根目录；`in_project_root: true` 时 `data_root` 相对项目根目录解析，`false` 时 `data_root` 必须是绝对路径，适合 RunPod volume 挂载。
 - `path.db_path`、`path.raw_img_dir`、`path.cache_dir`、`path.model_dir`、CSV、review 输出和 checkpoint 路径相对 `path.data_root` 解析；`manual_series_overrides_path`、`fine_grain_series.rules_path` 等代码/配置文件仍相对项目根目录解析。
 - `crawler.active_operators` 控制当前纳入的数据范围。
-- `crawler.manifest_max_depth`、`manifest_max_files_per_category` 控制 Commons 分类递归与每分类文件上限。
+- `crawler.manifest_max_depth`、`manifest_max_files_per_category` 控制 Commons 分类递归与每分类文件上限；`crawler.manifest_reprocess` 控制是否忽略 category checkpoint 并覆盖重爬 manifest。
 - `image_filtering.*` 控制 SigLIP2 图片过滤。
 - `llm_labeling.*` 控制 OpenAI 元数据抽取。
 - `fine_grain_series.*` 控制细粒度车型标签规则。

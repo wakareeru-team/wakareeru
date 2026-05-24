@@ -29,6 +29,8 @@ crawler:
   manifest_max_files_per_category: 50
   # 0 = only root category; positive numbers recurse into subcategories; -1 = unlimited.
   manifest_max_depth: 4
+  # false = skip category file manifests already marked ok in the DB; true = overwrite crawl them.
+  manifest_reprocess: false
   download_batch_size: 500
   # -1 = no cap; positive numbers download at most that many pending rows.
   download_total_limit: -1
@@ -143,7 +145,7 @@ lr_prediction: # 对未知数据应用LR模型
 
 crops_storage:
   format: 'flatten' #存储格式，可选'flatten'或'nested'。'flatten'表示将所有crop数据存储在同一层级的表中，'nested'表示按照series或submodel等层级结构存储。
-  reprocess: true #为false则跳过已经存储crop的数据
+  reprocess: false #为false则跳过已经存储crop的数据
   save_only_manual_reviewed: false # 仅保存人工审核过的crop数据到数据库，跳过未审核数据（包括自动审核和未审核数据）
   crop_pad_frac: 0.04
   image_extension: "jpeg"
