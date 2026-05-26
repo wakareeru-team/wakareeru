@@ -1,0 +1,27 @@
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+
+
+# 环境变量配置位置和一些必要的包
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HF_HOME=/workspace/.cache/huggingface
+ENV HF_HUB_CACHE=/workspace/.cache/huggingface/hub
+ENV TRANSFORMERS_CACHE=/workspace/.cache/huggingface/transformers
+ENV XDG_CACHE_HOME=/workspace/.cache
+ENV PIP_CACHE_DIR=/workspace/.cache/pip
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates curl git rsync rclone \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+COPY requirements-runpod.txt .
+RUN pip install --no-cache-dir -r requirements-runpod.txt
+
+COPY docker/entry.sh /usr/local/bin/wakareeru-entry
+RUN chmod +x /usr/local/bin/wakareeru-entry
+
+ENTRYPOINT ["/usr/local/bin/wakareeru-entry"]
+CMD ["bash"]
+
