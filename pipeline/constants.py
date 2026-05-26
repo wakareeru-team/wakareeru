@@ -145,7 +145,7 @@ FILE_INTERIOR_PATTERNS = (
     "cab", "cockpit", "toilet", "wc", "route map", "counter", "merchandising counter",
     "display", "lcd", "trainchannel", "syanai", "camera",
     "車内", "運転台", "運転室", "トイレ", "便所", "洗面所", "洗面台",
-    "モニター", "カウンター", "停車駅案内", "案内表示器", "カメラ",
+    "モニター", "カウンター", "停車駅案内", "案内表示器", "カメラ", 'bus', 'Bus', 'バス', 
 )
 
 FILE_DETAIL_PATTERNS = (
@@ -154,7 +154,7 @@ FILE_DETAIL_PATTERNS = (
 )
 
 CATEGORY_EXCLUDE_PATTERNS = (
-    "interior", "inside", "parts", "seats", "information display", "mockup","green car"
+    "interior", "inside", "parts", "seats", "information display", "mockup","green car", 'bus', 'Bus', 'バス'
 )
 
 SERIES_CATEGORY_EXCLUDE_PATTERNS = {
