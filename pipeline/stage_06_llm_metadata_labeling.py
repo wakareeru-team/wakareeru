@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from itertools import batched
+from itertools import islice
 import json
 import constants
 import utils
@@ -11,6 +11,16 @@ from tqdm.auto import tqdm
 
 config = utils.load_pipeline_config()
 logger = utils.get_logger("stage_06_llm_metadata_labeling")
+
+
+def _batched(iterable, n: int):
+    """Python 3.11-compatible replacement for itertools.batched."""
+    if n < 1:
+        raise ValueError("batch size must be at least one")
+    iterator = iter(iterable)
+    while batch := tuple(islice(iterator, n)):
+        yield batch
+
 
 def _as_bool(value, default: bool = False) -> bool:
     if value is None:
@@ -163,7 +173,7 @@ def main(config: dict | None = None):
     )
     
     with tqdm(total=len(pending_category_paths), desc="LLM metadata labeling", unit="path") as pbar:
-        for batch in batched(pending_category_paths.itertuples(index=False), batch_size):
+        for batch in _batched(pending_category_paths.itertuples(index=False), batch_size):
             # Send parsed category_path lists, not raw JSON strings, so the prompt is cleaner.
             batch_dict = [
                 {"category_path": json.loads(row.category_path_json)}
