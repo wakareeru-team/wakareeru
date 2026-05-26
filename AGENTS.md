@@ -44,6 +44,8 @@ config/
   manual_series_overrides.csv
   schema.sql               # 新数据库的基线 schema
   migrations/              # 既有数据库的增量迁移，按数字顺序执行
+docker/
+  entry.sh                 # RunPod 容器启动脚本；设置 HF cache 与 rclone R2 remote
 data/                      # 生成数据、SQLite、图片、缓存与 review 输出
 tools/                     # 人工 review 等交互式辅助工具；不是自动 pipeline stage
 src/crawler/               # 探索性 notebook；不是稳定管线入口
@@ -62,6 +64,14 @@ cp .env.example .env
 ```
 
 RunPod 等 GPU 镜像若已经内置 PyTorch/torchvision，可用 `requirements-runpod.txt` 安装运行依赖；该文件刻意不包含 `torch`/`torchvision`，避免覆盖镜像自带 CUDA 版本。
+
+RunPod Docker 镜像入口：
+
+```bash
+docker buildx build --platform linux/amd64 -f Dockerfile.basepod -t wakareeru-basepod:local --load .
+```
+
+`Dockerfile.basepod` 基于 RunPod PyTorch 镜像安装 `rsync`、`rclone` 与 Python 运行依赖，并设置 Hugging Face 与 pip cache 到 `/workspace/.cache`。容器启动时 `docker/entry.sh` 从运行时环境变量配置 rclone remote `r2`，不把 secret 写入镜像层；需要的环境变量为 `HF_TOKEN`、`R2_ACCESS_ID`、`R2_ACCESS_KEY`、`R2_ENDPOINT`。RunPod volume 建议挂载到 `/workspace`，生成数据可通过 `path.in_project_root: false` 与绝对 `path.data_root` 指到 `/workspace/data`。
 
 运行完整管线：
 

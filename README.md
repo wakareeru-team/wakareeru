@@ -28,12 +28,15 @@
 - `torch` / `torchvision` / `transformers` / `accelerate`：SigLIP2、DINO、Grounding-DINO 等模型推理与训练实验。
 - `openai`：Commons 分类路径的结构化标签抽取。
 - SQLite：图片、分类、裁切框和过滤状态的主数据表。
+- Docker / RunPod：GPU 运行环境；`Dockerfile.basepod` 基于 RunPod PyTorch 镜像安装非 PyTorch 运行依赖。
+- `rclone` / `rsync`：RunPod volume 与 Cloudflare R2 等远端对象存储之间的数据同步。
 
 完整依赖见 [pyproject.toml](pyproject.toml) 与 [environment.yml](environment.yml)。
 
 ## 仓库结构
 
 ```text
+Dockerfile.basepod        # RunPod 基础镜像构建文件
 pipeline_entry.py          # 管线入口，可运行全部阶段或指定阶段
 pipeline/                  # 主数据管线，每个 stage 可独立运行
   stage_01_model_parsing.py
@@ -51,6 +54,8 @@ config/
   manual_series_overrides.csv
   schema.sql
   migrations/
+docker/
+  entry.sh                 # 容器启动脚本，设置 HF cache 与 rclone R2 remote
 data/
   commons_image_manifest.sqlite
   jr_east_freight_series.csv
@@ -78,6 +83,39 @@ RunPod 等 GPU 镜像若已经内置 PyTorch/torchvision，可安装轻量运行
 pip install -r requirements-runpod.txt
 pip install -e .
 ```
+
+也可以基于 [Dockerfile.basepod](Dockerfile.basepod) 构建 RunPod 镜像。该镜像假定基础镜像已经提供 CUDA 版 PyTorch/torchvision，只额外安装系统工具、`requirements-runpod.txt` 和启动脚本：
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  -f Dockerfile.basepod \
+  -t wakareeru-basepod:local \
+  --load \
+  .
+```
+
+容器启动时会先执行 [docker/entry.sh](docker/entry.sh)，设置 Hugging Face cache 到 `/workspace/.cache`，并从运行时环境变量配置名为 `r2` 的 rclone remote。RunPod secrets 可注入为：
+
+```bash
+HF_TOKEN={{ RUNPOD_SECRET_huggingface_token }}
+R2_ACCESS_ID={{ RUNPOD_SECRET_r2_access_key_id }}
+R2_ACCESS_KEY={{ RUNPOD_SECRET_r2_secret_access_key }}
+R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+```
+
+本地测试示例：
+
+```bash
+docker run --platform linux/amd64 --rm -it \
+  -e HF_TOKEN="..." \
+  -e R2_ACCESS_ID="..." \
+  -e R2_ACCESS_KEY="..." \
+  -e R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com" \
+  wakareeru-basepod:local
+```
+
+进入容器后可用 `rclone lsd r2:` 检查 remote。工作目录默认是 `/workspace`；RunPod volume 建议挂载到 `/workspace`，数据目录可在 `config/pipeline_config.yaml` 中用绝对路径如 `/workspace/data` 指定。
 
 如果需要运行 LLM 元数据阶段，请配置 OpenAI API Key：
 
