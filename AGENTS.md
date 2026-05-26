@@ -119,7 +119,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 | `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV |
 | `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射 |
 | `manifest_crawling` | `stage_03_manifest_crawling.py` | 查询 Commons 分类树，写入 `categories` 与 `images` |
-| `img_crawling` | `stage_04_img_crawler.py` | 下载图片并更新 `images.download_status` |
+| `img_crawling` | `stage_04_img_crawler.py` | 下载图片，更新 `images.download_status`，并将图片文件名与 `images.downloaded_path` 规范化为 Unicode NFC |
 | `siglip_filter` | `stage_05_siglip_image_filtering.py` | 用 SigLIP2 过滤内饰、局部细节等不适合训练的图片 |
 | `llm_labeling` | `stage_06_llm_metadata_labeling.py` | 用 OpenAI API 从分类路径抽取番台、子型号、运营公司等元数据 |
 | `fine_grain_series` | `stage_08_fine_grain_series.py` | 根据 LLM 元数据和人工规则构造 `fine_grained_series` |

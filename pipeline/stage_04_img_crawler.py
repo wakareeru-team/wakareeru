@@ -13,6 +13,7 @@ import httpx
 from tqdm import tqdm
 
 import constants
+import path_normalization
 import utils
 
 
@@ -28,7 +29,7 @@ def safe_path_component(value: str, max_len: int = 120) -> str:
     value = unquote(str(value or "")).removeprefix("File:").strip()
     value = re.sub(r'[\\/:*?"<>|]+', "_", value)
     value = re.sub(r"\s+", " ", value).strip(" .")
-    return (value or "unnamed")[:max_len]
+    return path_normalization.normalize_text(value or "unnamed")[:max_len]
 
 
 def local_image_path(
@@ -45,7 +46,9 @@ def local_image_path(
 
     abs_path = os.path.join(img_root, series_dir, file_name)
     data_root = data_root or utils.get_data_root()
-    rel_path = os.path.relpath(abs_path, data_root).replace(os.sep, "/")
+    rel_path = path_normalization.normalize_rel_path(
+        os.path.relpath(abs_path, data_root).replace(os.sep, "/")
+    )
     return abs_path, rel_path
 
 
@@ -335,6 +338,16 @@ def main(config: dict | None = None):
         request_interval=float(crawler_config["download_request_interval"]),
     )
     logger.info("下载结果: %s", result)
+
+    normalization_report = path_normalization.normalize_downloaded_image_paths(
+        db_path=db_path,
+        img_root=img_root,
+    )
+    logger.info(
+        "图片路径 NFC 规范化完成: filesystem_renames=%d, db_updates=%d",
+        normalization_report.filesystem_renames,
+        normalization_report.db_updates,
+    )
 
 if __name__ == "__main__":
     main()
