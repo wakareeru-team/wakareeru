@@ -94,6 +94,13 @@ python tools/export_noise_review_csv.py --output-csv-path review/noise_review_la
 python tools/import_noise_review_csv.py --review-csv-path review/noise_review_labels.csv
 ```
 
+跨平台迁移图片后，如遇到视觉相同但 Unicode 字节不同的文件名（例如 macOS 与 Linux 的 NFC/NFD 差异），先 dry-run 检查，再显式应用路径规范化；该工具会把 `path.raw_img_dir` 下文件名和 `images.downloaded_path` 统一为 NFC：
+
+```bash
+python tools/normalize_image_paths.py
+python tools/normalize_image_paths.py --apply
+```
+
 开发检查：
 
 ```bash
