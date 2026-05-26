@@ -146,6 +146,8 @@ FILE_INTERIOR_PATTERNS = (
     "display", "lcd", "trainchannel", "syanai", "camera",
     "車内", "運転台", "運転室", "トイレ", "便所", "洗面所", "洗面台",
     "モニター", "カウンター", "停車駅案内", "案内表示器", "カメラ", 'bus', 'Bus', 'バス', 
+    'breakfast', 'lunch', 'dinner', 'bento', 'food', 'meal', 'cafe', 'café', 'catering',
+    '駅弁', '食事', '飲食', 'カフェ', 'ケータリング', '朝ご飯', '昼ご飯', '夜ご飯', '弁当', '昼めし'
 )
 
 FILE_DETAIL_PATTERNS = (
