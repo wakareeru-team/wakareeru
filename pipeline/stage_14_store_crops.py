@@ -180,6 +180,10 @@ def main(config: dict | None = None) -> None:
                 SELECT
                     c.id AS crop_id,
                     c.image_id,
+                    CASE
+                        WHEN c.noise_review_label = '{constants.NOISE_REVIEW_LABEL_OK}' THEN 1
+                        ELSE 0
+                    END AS manual_reviewed,
                     c.box_x1,
                     c.box_y1,
                     c.box_x2,

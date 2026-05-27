@@ -159,7 +159,7 @@ crops_storage:
   image_extension: "jpeg"
   label_column: "fine_grained_series"
   image_metadata_columns: ['downloaded_path',"series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
-  metadata_columns: ["image_path", "label_id", "label", "label_en", "series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
+  metadata_columns: ["image_path", "label_id", "label", "label_en", "manual_reviewed", "series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
   jpeg_quality: 95
 
   

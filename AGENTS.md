@@ -134,6 +134,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 | `llm_labeling` | `stage_06_llm_metadata_labeling.py` | 用 OpenAI API 从分类路径抽取番台、子型号、运营公司等元数据 |
 | `fine_grain_series` | `stage_08_fine_grain_series.py` | 根据 LLM 元数据和人工规则构造 `fine_grained_series` |
 | `gdino_bbox` | `stage_07_gdino_bbox.py` | 用 Grounding-DINO 检测车辆主体并写入 `crops` |
+| `store_crops` | `stage_14_store_crops.py` | 将 crop 图像保存为最终数据集，并生成 `metadata.csv` / `labels.csv`；`metadata.manual_reviewed` 表示人工复核为 `ok` 的高确信样本 |
 
 `pipeline/deprecated_stage_08_siglip_crop_filtering.py` 是弃用阶段，不应作为默认流程的一部分。
 
@@ -177,6 +178,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
+- `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。
 
 ## 维护边界
 
