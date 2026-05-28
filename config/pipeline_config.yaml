@@ -114,6 +114,11 @@ noise_detection:
   feature_cache_dir: "feature_cache"
   active_feature_cache_file: "latest"
   latest_feature_cache_file: "latest_feature_cache.txt"
+  exclude_manual_noise: true
+  manual_noise_labels: ["wrong_label", "out_of_label_space", "bad_crop"]
+  exclude_predicted_noise: true
+  predicted_noise_labels: ["wrong_label"]
+  predicted_noise_min_prob: 0.8
 
 loss_noise_tracking:
   embedding_feature_dim: 384

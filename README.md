@@ -175,7 +175,7 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 | `loss_analysis` | 聚合 loss 特征并生成噪声筛查分数 |
 | `logistic_regression_filter` | 基于人工复核标签训练 LR 噪声筛选器 |
 | `lr_prediction` | 生成 LR 噪声预测 CSV，并可选同步数据库 |
-| `store_crops` | 保存最终 crop 图像并生成 `metadata.csv` / `labels.csv`，其中 `manual_reviewed` 标记人工复核为 `ok` 的样本 |
+| `store_crops` | 保存最终 crop 图像并生成 `metadata.csv` / `labels.csv`，其中 `manual_reviewed` 标记人工复核为 `ok` 的样本，人工错标纠正会优先覆盖导出标签 |
 
 ## 数据流
 
@@ -188,15 +188,15 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 7. `stage_08_fine_grain_series.py` 根据 LLM 元数据和人工规则构造 `fine_grained_series`。
 8. `stage_07_gdino_bbox.py` 使用 `IDEA-Research/grounding-dino-base` 生成车辆主体 bbox 与裁切记录。
 9. `stage_09_DINOv3_feature_extraction.py` 提取 crop 图像特征，缓存 `features` 与 `crop_ids`，不绑定细粒度标签。
-10. `stage_10_train_loss_tracking.py` 按当前数据库标签动态生成本轮 label id，训练线性头并记录 loss。
+10. `stage_10_train_loss_tracking.py` 按当前数据库标签动态生成本轮 label id，并过滤人工噪声与上一轮 LR 预测噪声后训练线性头。
 11. `stage_11_loss_analysis.py` 读取本轮 `label_map.json` 和 loss history，生成噪声筛查特征。
-12. `stage_14_store_crops.py` 保存最终 crop 图像，并在 `metadata.csv` 中写入 `manual_reviewed` 供评估集筛选。
+12. `stage_14_store_crops.py` 保存最终 crop 图像，并在 `metadata.csv` 中写入 `manual_reviewed` 供评估集筛选；人工错标纠正会通过 crop 级 `manual_corrected_label` 覆盖训练和导出标签。
 
 主数据库为 `data/commons_image_manifest.sqlite`，关键表包括：
 
 - `categories`：每个系列解析到的 Commons 分类。
 - `images`：每张 Commons 图片的元数据、下载状态、过滤结果和 LLM 标签。
-- `crops`：Grounding-DINO 生成的主体框、置信度、裁切状态和噪声分数。
+- `crops`：Grounding-DINO 生成的主体框、置信度、裁切状态、噪声分数、人工复核标签、LR 预测标签和 crop 级人工纠正标签。
 
 ## 配置
 
@@ -208,6 +208,7 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 - `llm_labeling.openai_model_name` 控制 LLM 元数据抽取模型。
 - `fine_grain_series.rules_path` 控制细粒度车型标签规则 CSV，默认是 `config/manual_fine_grained_series.csv`。
 - `gdino.model_name`、`box_threshold`、`nms_iou_threshold` 控制主体检测。
+- `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 控制下一轮 loss tracking 是否排除人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。
 - `noise_detection` 用于后续 DINO 特征缓存与 small-loss trick 噪声检测实验；特征缓存只绑定 crop 图像和 `crop_id`，训练标签 id 在 loss tracking 轮次中动态生成。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列，默认包含 `manual_reviewed`。
 

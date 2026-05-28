@@ -162,7 +162,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `categories`：Commons 分类树节点、父分类、抓取状态与错误信息。
 - `images`：每个 Commons 文件在某个系列/分类下的 manifest 记录，包含标签来源、分类路径、图片元数据、过滤状态、下载状态、LLM 元数据与 `fine_grained_series`。
 - `image_categories`：文件与分类的多对多归属关系。
-- `crops`：Grounding-DINO bbox、检测置信度、裁切状态、噪声分数和人工噪声复核字段。
+- `crops`：Grounding-DINO bbox、检测置信度、裁切状态、噪声分数、人工噪声复核字段和 crop 级人工纠正标签。
 
 常用状态字段：
 
@@ -171,7 +171,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `images.download_status`：`not_started`、`downloaded`、`failed`、`missing_url`。
 - `images.downloaded_path`：相对 `path.data_root` 的图片路径，通常形如 `img/<series>/<file>`。
 - `crops.crop_status`：`pending`、`ok`、`rejected`。
-- `crops.noise_score_v1` 与 `noise_review_*`：Small Loss Trick / 人工复核相关字段；跨机器迁移人工复核结果时使用 `tools/import_noise_review_csv.py` 显式导入，不作为默认 pipeline stage。
+- `crops.noise_score_v1` 与 `noise_review_*`：Small Loss Trick / 人工复核相关字段；`manual_corrected_label` 是人工确认错标后写入的 crop 级正确标签，`loss_tracking` 与 `store_crops` 会优先使用它，LR 噪声筛选训练会把已纠正样本视为 clean；跨机器迁移人工复核结果时使用 `tools/import_noise_review_csv.py` 显式导入，不作为默认 pipeline stage。
 
 ## 配置要点
 
@@ -183,7 +183,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `llm_labeling.*` 控制 OpenAI 元数据抽取，包括是否为 Responses API 启用 `web_search` 工具。
 - `fine_grain_series.*` 控制细粒度车型标签规则。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
-- `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。
+- `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。`loss_tracking` 会按 `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 过滤人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。
 

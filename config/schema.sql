@@ -109,6 +109,8 @@ CREATE TABLE IF NOT EXISTS crops (
     noise_review_note      TEXT,
     noise_reviewed_at      TEXT,
     noise_review_score_col TEXT,
+    manual_corrected_label TEXT, -- crop-level label correction for known in-scope labels
+    manual_corrected_at    TEXT,
 
     -- Model classification output for crop noise analysis (logistic regression)
     noise_predicted_prob REAL,
