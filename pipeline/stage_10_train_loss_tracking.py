@@ -134,14 +134,11 @@ def main(config: dict | None = None) -> None:
         "latest_feature_cache_file",
         "latest_feature_cache.txt",
     )
-    loss_history_path = utils.join_data_root(
-        loss_tracking_cfg.get("loss_history_path", "demo_loss_history.csv"),
-        config=config,
-    )
-    epoch_history_path = utils.join_data_root(
-        loss_tracking_cfg.get("epoch_history_path", "demo_epoch_history.csv"),
-        config=config,
-    )
+    
+    loss_dir = utils.create_new_loss_round_dir(config)
+    loss_history_path = loss_dir / loss_tracking_cfg["loss_history_file_name"]
+    epoch_history_path = loss_dir / loss_tracking_cfg["epoch_history_file_name"]
+    
     model_dir = utils.join_data_root(config["path"].get("model_dir", "model"), config=config)
     model_checkpoint_prefix = loss_tracking_cfg.get("model_checkpoint_prefix", "DINO_CLS_HEAD")
     embed_dim = int(loss_tracking_cfg['embedding_feature_dim'])
@@ -249,8 +246,6 @@ def main(config: dict | None = None) -> None:
     )
     epoch_history = pd.DataFrame(epoch_records)
     
-    loss_history_path.parent.mkdir(parents=True, exist_ok=True)
-    epoch_history_path.parent.mkdir(parents=True, exist_ok=True)
     loss_history.to_csv(loss_history_path, index=False)
     epoch_history.to_csv(epoch_history_path, index=False)
 

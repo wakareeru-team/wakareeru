@@ -41,19 +41,27 @@ def main(config: dict | None = None) -> None:
 
     # 跳过人工审核过的crop
     with sqlite3.connect(db_path) as conn:
-        if lr_prediction_config["reprocess"]:
-            query = "SELECT id AS crop_id FROM crops WHERE noise_review_label IS NULL"
-        else:
-            query = "SELECT id AS crop_id FROM crops WHERE noise_review_label IS NULL AND noise_predicted_label IS NULL"
-
+        query = "SELECT id AS crop_id FROM crops WHERE noise_review_label IS NULL"
         crops_to_process = pd.read_sql_query(query, conn)
+
+    loss_round_dir = utils.get_current_loss_round_dir(config)
+    prediction_path = loss_round_dir / lr_prediction_config["prediction_file_name"]
+    existing_predictions = pd.DataFrame()
+    if prediction_path.exists():
+        existing_predictions = pd.read_csv(prediction_path)
+        if not lr_prediction_config["reprocess"]:
+            predicted_crop_ids = set(existing_predictions["crop_id"].astype(int))
+            crops_to_process = crops_to_process[
+                ~crops_to_process["crop_id"].astype(int).isin(predicted_crop_ids)
+            ]
+
     if len(crops_to_process) == 0:
         logger.info("没有需要进行LR预测的crop，跳过此阶段")
-        return constants.STAGE_INTERRUPT # type: ignore
+        return constants.STAGE_PASS # type: ignore
     logger.info(f"需要进行LR预测的crop数量: {len(crops_to_process)}")
     
     # 加载需要预测的crop的feature
-    features = pd.read_csv(utils.join_data_root(config['loss_analysis']['loss_feature_dir'], config=config))
+    features = pd.read_csv(loss_round_dir / config['loss_analysis']['loss_feature_file_name'])
     
     features_to_predict = features[features['crop_id'].isin(crops_to_process['crop_id'])]
     features_to_predict = features_to_predict.reset_index(drop=True)
@@ -72,6 +80,21 @@ def main(config: dict | None = None) -> None:
     clean_label = lr_config["clean_label"]
     predicted_labels = [positive_label if pred else clean_label for pred in prediction]
     logger.info(f"LR预测完成，正样本比例: {sum(prediction)}/{len(prediction)}={sum(prediction)/len(prediction):.2%}")
+    prediction_df = features_to_predict.copy()
+    prediction_df["noise_predicted_prob"] = probability.astype(float)
+    prediction_df["noise_predicted_label"] = predicted_labels
+    prediction_df["noise_prediction_model"] = model_name
+    prediction_df["predicted_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    if not existing_predictions.empty and not lr_prediction_config["reprocess"]:
+        prediction_df = pd.concat([existing_predictions, prediction_df], ignore_index=True)
+        prediction_df = prediction_df.drop_duplicates("crop_id", keep="last")
+    prediction_df.to_csv(prediction_path, index=False)
+    logger.info("LR预测结果已保存至 %s", prediction_path)
+
+    if not lr_prediction_config["sync_to_db"]:
+        logger.info("lr_prediction.sync_to_db=false，跳过数据库同步。")
+        return constants.STAGE_COMPLETED # type: ignore
+
     rows = [
         (float(prob), label, model_name, int(crop_id))
         for prob, label, crop_id in zip(

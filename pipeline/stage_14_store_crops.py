@@ -141,6 +141,23 @@ def flush_crop_save_updates(db_path: Path, updates: list[tuple[str, int]]) -> No
         conn.commit()
 
 
+def load_noise_predictions(config: dict, crops_storage_config: dict) -> pd.DataFrame:
+    prediction_round = crops_storage_config["noise_prediction_round"]
+    prediction_dir = utils.get_loss_round_dir(
+        config=config,
+        active_round=prediction_round,
+    )
+    prediction_path = prediction_dir / crops_storage_config["noise_prediction_file_name"]
+    if not prediction_path.exists():
+        raise FileNotFoundError(f"Expected LR prediction CSV not found: {prediction_path}")
+    predictions = pd.read_csv(prediction_path)
+    required_columns = {"crop_id", "noise_predicted_prob", "noise_predicted_label"}
+    missing_columns = required_columns - set(predictions.columns)
+    if missing_columns:
+        raise ValueError(f"LR prediction CSV missing columns: {sorted(missing_columns)}")
+    return predictions
+
+
 def main(config: dict | None = None) -> None:
     if config is None:
         config = utils.load_pipeline_config()
@@ -162,6 +179,13 @@ def main(config: dict | None = None) -> None:
         where_conditions.append(f"c.noise_review_label = 'ok'")
     else:
         logger.info("将保存所有crop数据到数据库，包括人工审核过的、自动审核过的和未审核的数据")
+
+    if crops_storage_config["exclude_manual_noise"]:
+        manual_noise_labels = crops_storage_config["manual_noise_labels"]
+        label_placeholders = ", ".join(f"'{label}'" for label in manual_noise_labels)
+        where_conditions.append(
+            f"(c.noise_review_label IS NULL OR c.noise_review_label NOT IN ({label_placeholders}))"
+        )
             
         
 
@@ -180,6 +204,7 @@ def main(config: dict | None = None) -> None:
                 SELECT
                     c.id AS crop_id,
                     c.image_id,
+                    c.noise_review_label,
                     CASE
                         WHEN c.noise_review_label = '{constants.NOISE_REVIEW_LABEL_OK}' THEN 1
                         ELSE 0
@@ -195,6 +220,27 @@ def main(config: dict | None = None) -> None:
                 ORDER BY c.id
             """
             metadata = pd.read_sql_query(crop_sql, conn)
+
+        if crops_storage_config["exclude_predicted_noise"]:
+            predictions = load_noise_predictions(config, crops_storage_config)
+            before_count = len(metadata)
+            metadata = metadata.merge(
+                predictions[["crop_id", "noise_predicted_prob", "noise_predicted_label"]],
+                on="crop_id",
+                how="left",
+            )
+            predicted_noise_labels = set(crops_storage_config["predicted_noise_labels"])
+            predicted_noise_min_prob = float(crops_storage_config["predicted_noise_min_prob"])
+            predicted_noise_mask = (
+                metadata["noise_predicted_label"].isin(predicted_noise_labels)
+                & (metadata["noise_predicted_prob"].fillna(0.0) >= predicted_noise_min_prob)
+            )
+            metadata = metadata.loc[~predicted_noise_mask].reset_index(drop=True)
+            logger.info(
+                "按LR预测过滤crop：过滤%d条，保留%d条。",
+                before_count - len(metadata),
+                len(metadata),
+            )
             
         metadata = build_en_label(
             metadata,

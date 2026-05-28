@@ -36,7 +36,10 @@ def main(config: dict | None = None) -> None:
     utils.init_db(config=config)
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     logger.info("对人工标记数据进行logistic regression")
-    features = pd.read_csv(utils.join_data_root(config['loss_analysis']['loss_feature_dir'], config=config))
+    
+    
+    features = pd.read_csv(utils.get_current_loss_round_dir(config)
+                        / config['loss_analysis']['loss_feature_file_name'])
 
 
     with sqlite3.connect(db_path) as conn:

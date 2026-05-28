@@ -119,9 +119,10 @@ def main(config: dict | None = None) -> None:
     series= None if noise_detection_cfg.get("full_series") else noise_detection_cfg.get("series_test_scope"),
     label_granularity=noise_detection_cfg['label_granularity'],
     )
-    
-    lossdf = pd.read_csv(utils.join_data_root(loss_noise_tracking_cfg['loss_history_path']))
-    epochdf = pd.read_csv(utils.join_data_root(loss_noise_tracking_cfg['epoch_history_path']))
+    loss_tracking_path = utils.get_current_loss_round_dir(config) / loss_noise_tracking_cfg["loss_history_file_name"]
+    epoch_tracking_path = utils.get_current_loss_round_dir(config) / loss_noise_tracking_cfg["epoch_history_file_name"]
+    lossdf = pd.read_csv(utils.join_data_root(loss_tracking_path))
+    epochdf = pd.read_csv(utils.join_data_root(epoch_tracking_path))
 
 
     LABEL_COL = "label"
@@ -172,18 +173,20 @@ def main(config: dict | None = None) -> None:
     # inter-label loss quantile分析
     loss_feature['loss_mean_pct_in_label'] = loss_feature.groupby('label')['mean'].rank(pct=True)
     loss_feature.head(10)
-    loss_feature.to_csv(utils.join_data_root(config['loss_analysis']['loss_feature_dir']), index=False)
+    loss_feature_path = utils.get_current_loss_round_dir(config) / config['loss_analysis']['loss_feature_file_name']
+    loss_feature.to_csv(utils.join_data_root(loss_feature_path), index=False)
     logger.info("已提取%d条损失分析数据，包含loss趋势，尾部均值，模型预测和inter label percentile.", len(loss_feature))
-    logger.info("损失分析数据提取完成，保存至 %s", config['loss_analysis']['loss_feature_dir'])
-    
-    
+    logger.info("损失分析数据提取完成，保存至 %s", loss_feature_path)
+
+
     # v1最简评分
     loss_feature["noise_score_v1"] = (
         loss_feature["loss_mean_pct_in_label"] +
         loss_feature["error_rate"]
     )
     
-        # 保存到数据库
+    # 保存到数据库
+    
     scores = loss_feature[["noise_score_v1","crop_id"]].copy().to_dict(orient="records")
     scores = [tuple(row.values()) for row in scores]
     len(scores)
