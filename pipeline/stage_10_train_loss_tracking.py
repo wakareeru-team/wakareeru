@@ -23,6 +23,7 @@ from transformers.image_utils import load_image
 load_dotenv(override=False)
 from huggingface_hub import login
 import utils
+import constants
 
 logger = utils.get_logger("stage_10_train_loss_tracking")
 
@@ -47,14 +48,14 @@ def get_torch_device() -> torch.device:
 
 def resolve_feature_cache_file(file_name: str | None, latest_feature_cache_path: Path) -> str:
     if not file_name:
-        raise ValueError("noise_detection.active_feature_cache_file is not configured")
+        raise ValueError("未配置 noise_detection.active_feature_cache_file")
     if file_name != "latest":
         return file_name
     if not latest_feature_cache_path.exists():
-        raise FileNotFoundError(f"Latest feature cache pointer not found: {latest_feature_cache_path}")
+        raise FileNotFoundError(f"找不到最新特征缓存指针文件: {latest_feature_cache_path}")
     latest_file = latest_feature_cache_path.read_text(encoding="utf-8").strip()
     if not latest_file:
-        raise ValueError(f"Latest feature cache pointer is empty: {latest_feature_cache_path}")
+        raise ValueError(f"最新特征缓存指针文件为空: {latest_feature_cache_path}")
     return latest_file
 
 
@@ -81,11 +82,11 @@ def make_sawtooth_lambda(lr_max: float, lr_min: float, period_steps: int):
     At step period_steps: jumps back to lr_max
     """
     if period_steps <= 1:
-        raise ValueError("period_steps must be > 1")
+        raise ValueError("period_steps 必须大于 1")
     if lr_max <= 0 or lr_min < 0:
-        raise ValueError("lr_max must be > 0 and lr_min must be >= 0")
+        raise ValueError("lr_max 必须大于 0，且 lr_min 必须大于等于 0")
     if lr_min > lr_max:
-        raise ValueError("lr_min must be <= lr_max")
+        raise ValueError("lr_min 必须小于等于 lr_max")
 
     min_ratio = lr_min / lr_max
 
@@ -117,20 +118,24 @@ class FeatureDataset(torch.utils.data.Dataset):
 def load_current_crop_labels(
     db_path: Path,
     crop_ids: list[int],
-    label_granularity: str,
+    noise_detection_cfg: dict,
+    prediction_overlay: pd.DataFrame | None = None,
     chunk_size: int = 900,
 ) -> pd.DataFrame:
+    # 训练标签采用 crop 级人工纠正优先；没有纠正时回退到当前配置的标签粒度。
+    label_granularity = noise_detection_cfg["label_granularity"]
     if label_granularity == "submodel":
-        label_expr = "COALESCE(i.submodel, i.fine_grained_series, c.series)"
+        base_label_expr = "COALESCE(i.submodel, i.fine_grained_series, c.series)"
     elif label_granularity == "fine_grained_series":
-        label_expr = "COALESCE(i.fine_grained_series, c.series)"
+        base_label_expr = "COALESCE(i.fine_grained_series, c.series)"
     elif label_granularity == "series":
-        label_expr = "c.series"
+        base_label_expr = "c.series"
     else:
         raise ValueError(
-            "noise_detection.label_granularity must be one of: "
+            "noise_detection.label_granularity 必须是以下值之一: "
             "series, fine_grained_series, submodel"
         )
+    label_expr = f"COALESCE(NULLIF(c.manual_corrected_label, ''), {base_label_expr})"
 
     rows = []
     with sqlite3.connect(db_path) as conn:
@@ -140,7 +145,11 @@ def load_current_crop_labels(
             sql = f"""
                 SELECT
                     c.id AS crop_id,
-                    {label_expr} AS label
+                    {label_expr} AS label,
+                    c.noise_review_label,
+                    c.manual_corrected_label,
+                    c.noise_predicted_label,
+                    c.noise_predicted_prob
                 FROM crops c
                 JOIN images i ON i.id = c.image_id
                 WHERE c.id IN ({placeholders})
@@ -148,16 +157,53 @@ def load_current_crop_labels(
             rows.append(pd.read_sql_query(sql, conn, params=chunk))
 
     if not rows:
-        return pd.DataFrame(columns=["crop_id", "label"])
+        return pd.DataFrame(columns=["crop_id", "label", "filter_reason"])
     labels = pd.concat(rows, ignore_index=True)
     labels["crop_id"] = labels["crop_id"].astype(int)
+    if prediction_overlay is not None and not prediction_overlay.empty:
+        # sync_to_db=false 时，用上一轮预测 CSV 覆盖 DB 中可能为空的预测字段。
+        labels = labels.drop(columns=["noise_predicted_label", "noise_predicted_prob"])
+        labels = labels.merge(prediction_overlay, on="crop_id", how="left")
+    labels["filter_reason"] = ""
+
+    corrected = (
+        labels["manual_corrected_label"].notna()
+        & (labels["manual_corrected_label"].astype(str).str.strip() != "")
+    )
+    review_label = labels["noise_review_label"].fillna("").astype(str).str.strip()
+
+    if noise_detection_cfg["exclude_manual_noise"]:
+        # 人工确认错标但已给出正确标签的样本保留，并用纠正标签训练。
+        manual_noise_labels = set(noise_detection_cfg["manual_noise_labels"])
+        manual_noise = review_label.isin(manual_noise_labels)
+        corrected_wrong_label = (
+            review_label.eq(constants.NOISE_REVIEW_LABEL_WRONG_LABEL)
+            & corrected
+        )
+        manual_excluded = manual_noise & ~corrected_wrong_label
+        labels.loc[manual_excluded, "filter_reason"] = "manual_noise"
+
+    if noise_detection_cfg["exclude_predicted_noise"]:
+        # 上一轮模型预测噪声只过滤未人工确认 OK、也未人工纠正的样本。
+        predicted_noise_labels = set(noise_detection_cfg["predicted_noise_labels"])
+        predicted_prob = pd.to_numeric(labels["noise_predicted_prob"], errors="coerce").fillna(0.0)
+        predicted_excluded = (
+            labels["filter_reason"].eq("")
+            & ~corrected
+            & review_label.ne(constants.NOISE_REVIEW_LABEL_OK)
+            & labels["noise_predicted_label"].isin(predicted_noise_labels)
+            & (predicted_prob >= float(noise_detection_cfg["predicted_noise_min_prob"]))
+        )
+        labels.loc[predicted_excluded, "filter_reason"] = "predicted_noise"
+
     return labels
 
 
 def attach_current_labels_to_feature_cache(
     feature_cache: dict,
     db_path: Path,
-    label_granularity: str,
+    noise_detection_cfg: dict,
+    prediction_overlay: pd.DataFrame | None = None,
 ) -> dict:
     features = feature_cache["features"].float()
     crop_ids = feature_cache["crop_ids"].long()
@@ -165,16 +211,19 @@ def attach_current_labels_to_feature_cache(
     labels_df = load_current_crop_labels(
         db_path=db_path,
         crop_ids=crop_id_list,
-        label_granularity=label_granularity,
+        noise_detection_cfg=noise_detection_cfg,
+        prediction_overlay=prediction_overlay,
     )
     order_df = pd.DataFrame({"crop_id": crop_id_list, "feature_index": range(len(crop_id_list))})
     labeled = order_df.merge(labels_df, on="crop_id", how="left")
     labeled["label"] = labeled["label"].astype("string").str.strip()
-    keep = labeled["label"].notna() & (labeled["label"] != "")
+    labeled["filter_reason"] = labeled["filter_reason"].fillna("")
+    keep = labeled["label"].notna() & (labeled["label"] != "") & (labeled["filter_reason"] == "")
     if not keep.any():
-        raise ValueError("No feature cache crops have usable current labels")
+        raise ValueError("特征缓存中没有可用于本轮训练的已标注 crop")
 
-    skipped = int((~keep).sum())
+    skipped_unlabeled = int((labeled["label"].isna() | (labeled["label"] == "")).sum())
+    skipped_filtered = int((labeled["filter_reason"] != "").sum())
     labeled = labeled.loc[keep].copy()
     feature_indices = torch.tensor(labeled["feature_index"].to_numpy(), dtype=torch.long)
     labels = labeled["label"].astype(str)
@@ -189,8 +238,37 @@ def attach_current_labels_to_feature_cache(
         "labels": torch.tensor(labels.map(label_to_id).to_numpy(), dtype=torch.long),
         "label_to_id": label_to_id,
         "id_to_label": id_to_label,
-        "skipped_unlabeled_count": skipped,
+        "skipped_unlabeled_count": skipped_unlabeled,
+        "skipped_filtered_count": skipped_filtered,
     }
+
+
+def load_prediction_overlay(config: dict) -> pd.DataFrame | None:
+    noise_detection_cfg = config["noise_detection"]
+    if not noise_detection_cfg["exclude_predicted_noise"]:
+        return None
+    if config["lr_prediction"]["sync_to_db"]:
+        return None
+
+    prediction_dir = utils.get_current_loss_round_dir(config)
+    prediction_path = prediction_dir / config["lr_prediction"]["prediction_file_name"]
+    if not prediction_path.exists():
+        logger.warning(
+            "lr_prediction.sync_to_db=false，但上一轮预测文件不存在，跳过预测噪声过滤: %s",
+            prediction_path,
+        )
+        return None
+
+    predictions = pd.read_csv(prediction_path)
+    required_columns = {"crop_id", "noise_predicted_label", "noise_predicted_prob"}
+    missing_columns = required_columns - set(predictions.columns)
+    if missing_columns:
+        raise ValueError(f"LR 预测 CSV 缺少必要列: {sorted(missing_columns)}")
+    predictions = predictions[["crop_id", "noise_predicted_label", "noise_predicted_prob"]].copy()
+    predictions["crop_id"] = predictions["crop_id"].astype(int)
+    predictions = predictions.drop_duplicates("crop_id", keep="last")
+    logger.info("从上一轮预测 CSV 加载 %d 条噪声预测，用于本轮训练过滤: %s", len(predictions), prediction_path)
+    return predictions
 
 
 def save_label_map(
@@ -233,6 +311,7 @@ def main(config: dict | None = None) -> None:
         "latest_feature_cache.txt",
     )
     
+    # 先创建当前轮次目录，但等本轮训练产物完整写入后再更新 latest 指针。
     loss_dir = utils.create_new_loss_round_dir(config)
     loss_history_path = loss_dir / loss_tracking_cfg["loss_history_file_name"]
     epoch_history_path = loss_dir / loss_tracking_cfg["epoch_history_file_name"]
@@ -246,15 +325,17 @@ def main(config: dict | None = None) -> None:
     epochs = int(loss_tracking_cfg['num_epochs'])
     weight_decay = float(loss_tracking_cfg['weight_decay'])
     
-    logger.info("Stage 10 started. DB path: %s", db_path)
+    logger.info("第 10 阶段启动，数据库路径: %s", db_path)
     
 
     feature_cache_file = resolve_feature_cache_file(active_feature_cache_file, latest_feature_cache_path)
     raw_feature_cache = torch.load(feature_cache_dir / feature_cache_file, map_location="cpu")
+    prediction_overlay = load_prediction_overlay(config)
     feature_cache = attach_current_labels_to_feature_cache(
         raw_feature_cache,
         db_path=db_path,
-        label_granularity=noise_detection_cfg["label_granularity"],
+        noise_detection_cfg=noise_detection_cfg,
+        prediction_overlay=prediction_overlay,
     )
     label_to_id = feature_cache['label_to_id']
     id_to_label = feature_cache['id_to_label']
@@ -265,10 +346,11 @@ def main(config: dict | None = None) -> None:
         id_to_label,
     )
     logger.info(
-        "已加载特征缓存 %s，当前可训练样本=%d，跳过无标签样本=%d，标签类别数=%d，label map=%s",
+        "已加载特征缓存 %s，当前可训练样本=%d，跳过无标签样本=%d，按噪声过滤跳过=%d，标签类别数=%d，label map=%s",
         feature_cache_file,
         len(feature_cache["features"]),
         feature_cache["skipped_unlabeled_count"],
+        feature_cache["skipped_filtered_count"],
         len(label_to_id),
         label_map_path,
     )
@@ -290,7 +372,7 @@ def main(config: dict | None = None) -> None:
         lr_lambda=make_sawtooth_lambda(lr_max, lr_min, period),
     )
     criterion = torch.nn.CrossEntropyLoss(reduction='none')
-    logger.info(f'已建立{embed_dim}维线性分类头，训练设备: {train_device}，优化器: AdamW，学习率周期: {period} steps')
+    logger.info("已建立 %d 维线性分类头，训练设备: %s，优化器: AdamW，学习率周期: %d 步", embed_dim, train_device, period)
     
     
     # === 主训练部分 ===
@@ -298,7 +380,7 @@ def main(config: dict | None = None) -> None:
     loss_records = []
     epoch_records = []
     global_step = 0
-    for epoch in tqdm(range(epochs), desc="Training epochs"):
+    for epoch in tqdm(range(epochs), desc="训练线性头", unit="epoch"):
         head.train()
         
         running_loss = 0.0
@@ -371,9 +453,11 @@ def main(config: dict | None = None) -> None:
     model_checkpoint_path = model_dir / model_checkpoint_name
     torch.save(head.state_dict(), model_checkpoint_path)
 
-    logger.info("Loss history saved to %s", loss_history_path)
-    logger.info("Epoch history saved to %s", epoch_history_path)
-    logger.info("Linear head checkpoint saved to %s", model_checkpoint_path)
+    logger.info("loss history 已保存至 %s", loss_history_path)
+    logger.info("epoch history 已保存至 %s", epoch_history_path)
+    logger.info("线性分类头 checkpoint 已保存至 %s", model_checkpoint_path)
+    utils.update_latest_loss_round_pointer(config, loss_dir)
+    logger.info("最新 loss 轮次指针已更新为 %s", loss_dir.name)
 
 if __name__ == "__main__":
     main()

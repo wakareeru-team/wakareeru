@@ -77,10 +77,15 @@ def create_new_loss_round_dir(config: dict) -> Path:
     timestr = time.strftime('%Y%m%d_%H%M%S',time.localtime())
     analysis_dir = loss_analysis_root / timestr
     analysis_dir.mkdir(parents=True, exist_ok=False)
+    return analysis_dir
+
+
+def update_latest_loss_round_pointer(config: dict, loss_round_dir: Path) -> None:
+    loss_analysis_root = join_data_root(config['path']['loss_analysis_data_dir'], config=config)
+    loss_round_dir = Path(loss_round_dir)
     pointer = config['loss_noise_tracking']['latest_loss_analysis_round_pointer']
     with open(loss_analysis_root / pointer, 'w') as f:
-                f.write(timestr)
-    return analysis_dir
+        f.write(loss_round_dir.name)
 
 
 def get_current_loss_round_dir(config: dict) -> Path:

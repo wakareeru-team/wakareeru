@@ -183,8 +183,17 @@ def main(config: dict | None = None) -> None:
     if crops_storage_config["exclude_manual_noise"]:
         manual_noise_labels = crops_storage_config["manual_noise_labels"]
         label_placeholders = ", ".join(f"'{label}'" for label in manual_noise_labels)
+        corrected_wrong_label_clause = ""
+        if constants.NOISE_REVIEW_LABEL_WRONG_LABEL in set(manual_noise_labels):
+            corrected_wrong_label_clause = (
+                f" OR (c.noise_review_label = '{constants.NOISE_REVIEW_LABEL_WRONG_LABEL}'"
+                " AND c.manual_corrected_label IS NOT NULL"
+                " AND TRIM(c.manual_corrected_label) != '')"
+            )
         where_conditions.append(
-            f"(c.noise_review_label IS NULL OR c.noise_review_label NOT IN ({label_placeholders}))"
+            "(c.noise_review_label IS NULL "
+            f"OR c.noise_review_label NOT IN ({label_placeholders})"
+            f"{corrected_wrong_label_clause})"
         )
             
         
@@ -205,6 +214,7 @@ def main(config: dict | None = None) -> None:
                     c.id AS crop_id,
                     c.image_id,
                     c.noise_review_label,
+                    c.manual_corrected_label,
                     CASE
                         WHEN c.noise_review_label = '{constants.NOISE_REVIEW_LABEL_OK}' THEN 1
                         ELSE 0
@@ -221,6 +231,20 @@ def main(config: dict | None = None) -> None:
             """
             metadata = pd.read_sql_query(crop_sql, conn)
 
+        label_column = crops_storage_config["label_column"]
+        if label_column not in metadata.columns:
+            raise ValueError(f"image metadata中不存在label列: {label_column!r}")
+        corrected_mask = (
+            metadata["manual_corrected_label"].notna()
+            & (metadata["manual_corrected_label"].astype(str).str.strip() != "")
+        )
+        if corrected_mask.any():
+            metadata.loc[corrected_mask, label_column] = metadata.loc[
+                corrected_mask,
+                "manual_corrected_label",
+            ].astype(str)
+            logger.info("已应用%d条人工纠正标签。", int(corrected_mask.sum()))
+
         if crops_storage_config["exclude_predicted_noise"]:
             predictions = load_noise_predictions(config, crops_storage_config)
             before_count = len(metadata)
@@ -235,6 +259,7 @@ def main(config: dict | None = None) -> None:
                 metadata["noise_predicted_label"].isin(predicted_noise_labels)
                 & (metadata["noise_predicted_prob"].fillna(0.0) >= predicted_noise_min_prob)
             )
+            predicted_noise_mask = predicted_noise_mask & ~corrected_mask
             metadata = metadata.loc[~predicted_noise_mask].reset_index(drop=True)
             logger.info(
                 "按LR预测过滤crop：过滤%d条，保留%d条。",
@@ -244,7 +269,7 @@ def main(config: dict | None = None) -> None:
             
         metadata = build_en_label(
             metadata,
-            label_column=crops_storage_config["label_column"],
+            label_column=label_column,
         )
         
         logger.info("已加载%d条待裁剪crop及图片元数据。", len(metadata))

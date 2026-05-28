@@ -183,7 +183,7 @@ def main(config: dict | None = None) -> None:
     scores = loss_feature[["noise_score_v1","crop_id"]].copy().to_dict(orient="records")
     scores = [tuple(row.values()) for row in scores]
     len(scores)
-    utils.init_db()  # 确保数据库已同步
+    utils.init_db(config=config)  # 确保数据库已同步
     with sqlite3.connect(db_path) as conn:
         cur = conn.cursor()
         cur.executemany('''

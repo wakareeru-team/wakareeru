@@ -119,7 +119,7 @@ def load_crop_manifest(
     {limit_sql}
     """
     with sqlite3.connect(db_path) as conn:
-        df = pd.read_sql_query(sql, conn, params=params)
+        df = pd.read_sql_query(sql, conn, params=params) #type: ignore
 
     if shuffle and len(df):
         n = min(limit or len(df), len(df))
@@ -176,7 +176,7 @@ def load_crop(
     img = utils.load_img_with_orientation(
         _source_image_path(row, config=config)
     )
-    return crop_from_image(img, row, pad_frac=pad_frac)
+    return crop_from_image(img, row, pad_frac=pad_frac) #type: ignore
 
 
 # ===================== huggingface 数据集 ===================
