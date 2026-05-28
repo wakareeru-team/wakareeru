@@ -49,7 +49,9 @@ def export_review_csv(*, config: dict, output_csv_path: Path) -> int:
             c.noise_review_label,
             c.noise_review_note,
             c.noise_reviewed_at,
-            c.noise_review_score_col
+            c.noise_review_score_col,
+            c.manual_corrected_label,
+            c.manual_corrected_at
         FROM crops c
         JOIN images i ON i.id = c.image_id
         WHERE c.noise_review_label IS NOT NULL

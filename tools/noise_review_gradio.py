@@ -43,6 +43,8 @@ REVIEW_CONFIG = {
     "review_note_col": "noise_review_note",
     "reviewed_at_col": "noise_reviewed_at",
     "review_score_col": "noise_review_score_col",
+    "corrected_label_col": "manual_corrected_label",
+    "corrected_at_col": "manual_corrected_at",
 }
 
 REVIEW_COLUMN_DEFS = {
@@ -50,6 +52,8 @@ REVIEW_COLUMN_DEFS = {
     REVIEW_CONFIG["review_note_col"]: "TEXT",
     REVIEW_CONFIG["reviewed_at_col"]: "TEXT",
     REVIEW_CONFIG["review_score_col"]: "TEXT",
+    REVIEW_CONFIG["corrected_label_col"]: "TEXT",
+    REVIEW_CONFIG["corrected_at_col"]: "TEXT",
 }
 
 CONFIG: dict[str, Any] = {}
@@ -90,6 +94,36 @@ def score_columns(db_path: Path | None = None) -> list[str]:
     return preferred + numeric
 
 
+def label_expr_for_granularity(label_granularity: str) -> str:
+    if label_granularity == "submodel":
+        return "COALESCE(i.submodel, i.fine_grained_series, i.series)"
+    if label_granularity == "fine_grained_series":
+        return "COALESCE(i.fine_grained_series, i.series)"
+    if label_granularity == "series":
+        return "i.series"
+    raise ValueError(
+        "noise_detection.label_granularity must be one of: "
+        "series, fine_grained_series, submodel"
+    )
+
+
+def known_label_choices(db_path: Path | None = None) -> list[str]:
+    db_path = db_path or DB_PATH
+    label_granularity = CONFIG["noise_detection"]["label_granularity"]
+    label_expr = label_expr_for_granularity(label_granularity)
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT {label_expr} AS label
+            FROM images i
+            WHERE {label_expr} IS NOT NULL
+              AND TRIM({label_expr}) != ''
+            ORDER BY label
+            """
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
 def _numeric_columns(df: pd.DataFrame) -> list[str]:
     return [
         col for col in df.columns
@@ -126,6 +160,8 @@ def load_candidate_rows(
 ) -> pd.DataFrame:
     db_path = db_path or DB_PATH
     ensure_review_columns(db_path)
+    if corrected_label and corrected_label not in set(known_label_choices(db_path)):
+        raise gr.Error(f"Correct label 不在当前已知标签中: {corrected_label}")
     with sqlite3.connect(db_path) as conn:
         cols = crop_columns(conn)
         if score_col not in cols:
@@ -135,6 +171,7 @@ def load_candidate_rows(
         review_label_col = quote_ident(REVIEW_CONFIG["review_label_col"])
         review_note_col = quote_ident(REVIEW_CONFIG["review_note_col"])
         reviewed_at_col = quote_ident(REVIEW_CONFIG["reviewed_at_col"])
+        corrected_label_col = quote_ident(REVIEW_CONFIG["corrected_label_col"])
         where = [f"{score_expr} IS NOT NULL", "i.downloaded_path IS NOT NULL"]
         if skip_reviewed:
             where.append(f"(c.{review_label_col} IS NULL OR c.{review_label_col} = '')")
@@ -159,6 +196,7 @@ def load_candidate_rows(
                 c.{review_label_col} AS review_label,
                 c.{review_note_col} AS review_note,
                 c.{reviewed_at_col} AS reviewed_at,
+                c.{corrected_label_col} AS corrected_label,
                 i.file_title,
                 i.downloaded_path,
                 COALESCE(i.fine_grained_series, i.series) AS image_label,
@@ -207,6 +245,7 @@ def load_candidate_rows_from_loss_round(
         review_label_col = quote_ident(REVIEW_CONFIG["review_label_col"])
         review_note_col = quote_ident(REVIEW_CONFIG["review_note_col"])
         reviewed_at_col = quote_ident(REVIEW_CONFIG["reviewed_at_col"])
+        corrected_label_col = quote_ident(REVIEW_CONFIG["corrected_label_col"])
         where = ["i.downloaded_path IS NOT NULL"]
         sql = f"""
             SELECT
@@ -227,6 +266,7 @@ def load_candidate_rows_from_loss_round(
                 c.{review_label_col} AS review_label,
                 c.{review_note_col} AS review_note,
                 c.{reviewed_at_col} AS reviewed_at,
+                c.{corrected_label_col} AS corrected_label,
                 i.file_title,
                 i.downloaded_path,
                 COALESCE(i.fine_grained_series, i.series) AS image_label,
@@ -349,6 +389,7 @@ def row_markdown(row: dict[str, Any], idx: int, total: int) -> str:
         ("score_bin", row.get("score_bin")),
         ("series", row.get("series")),
         ("image_label", row.get("image_label")),
+        ("corrected_label", row.get("corrected_label")),
         ("loss_label", row.get("label")),
         ("pred_label", row.get("pred_label")),
         ("pred_label_rate", f"{float(row.get('pred_label_rate')):.4f}" if pd.notna(row.get("pred_label_rate")) else None),
@@ -372,12 +413,12 @@ def row_markdown(row: dict[str, Any], idx: int, total: int) -> str:
 def display_record(records: list[dict[str, Any]], idx: int):
     total = len(records or [])
     if total == 0:
-        return placeholder_image("No rows sampled."), "No rows sampled.", None, "", "0/0"
+        return placeholder_image("No rows sampled."), "No rows sampled.", None, "", None, "0/0"
 
     idx = int(idx)
     if idx >= total:
         message = f"Review complete. {total}/{total} sampled crops have been visited."
-        return placeholder_image(message), f"### Review complete\n\n{message}", None, "", f"{total}/{total} complete"
+        return placeholder_image(message), f"### Review complete\n\n{message}", None, "", None, f"{total}/{total} complete"
 
     idx = max(0, idx)
     row = records[idx]
@@ -385,13 +426,26 @@ def display_record(records: list[dict[str, Any]], idx: int):
     md = row_markdown(row, idx, total)
     label = row.get("review_label") if row.get("review_label") else None
     note = row.get("review_note") or ""
+    corrected_label = row.get("corrected_label") if row.get("corrected_label") else None
     progress = f"{idx + 1}/{total}"
-    return image, md, label, note, progress
+    return image, md, label, note, corrected_label, progress
 
 
-def save_review(crop_id: int, label: str, note: str, score_col: str, db_path: Path | None = None) -> None:
+def save_review(
+    crop_id: int,
+    label: str,
+    note: str,
+    corrected_label: str | None,
+    score_col: str,
+    db_path: Path | None = None,
+) -> None:
     if not label:
         raise gr.Error("请选择一个 review label 再保存。")
+    corrected_label = str(corrected_label or "").strip() or None
+    if label == constants.NOISE_REVIEW_LABEL_WRONG_LABEL and not corrected_label:
+        raise gr.Error("标记为 wrong_label 时，请从 Correct label 里选择正确标签。")
+    if label != constants.NOISE_REVIEW_LABEL_WRONG_LABEL:
+        corrected_label = None
 
     db_path = db_path or DB_PATH
     ensure_review_columns(db_path)
@@ -402,16 +456,20 @@ def save_review(crop_id: int, label: str, note: str, score_col: str, db_path: Pa
             SET {quote_ident(REVIEW_CONFIG['review_label_col'])} = ?,
                 {quote_ident(REVIEW_CONFIG['review_note_col'])} = ?,
                 {quote_ident(REVIEW_CONFIG['reviewed_at_col'])} = CURRENT_TIMESTAMP,
-                {quote_ident(REVIEW_CONFIG['review_score_col'])} = ?
+                {quote_ident(REVIEW_CONFIG['review_score_col'])} = ?,
+                {quote_ident(REVIEW_CONFIG['corrected_label_col'])} = ?,
+                {quote_ident(REVIEW_CONFIG['corrected_at_col'])} =
+                    CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END
             WHERE id = ?
             """,
-            (label, note or None, score_col, int(crop_id)),
+            (label, note or None, score_col, corrected_label, corrected_label, int(crop_id)),
         )
         conn.commit()
 
 
 def build_review_app():
     score_choices = score_columns()
+    label_choices = known_label_choices()
     default_score_col = REVIEW_CONFIG["score_col"] if REVIEW_CONFIG["score_col"] in score_choices else (
         score_choices[0] if score_choices else None
     )
@@ -480,6 +538,12 @@ def build_review_app():
                 with gr.Row():
                     quick_ambiguous_btn = gr.Button("Ambiguous", variant="secondary")
                 note = gr.Textbox(label="Note", lines=4, placeholder="optional")
+                corrected_label = gr.Dropdown(
+                    choices=label_choices,
+                    label="Correct label",
+                    allow_custom_value=False,
+                )
+                refresh_labels_btn = gr.Button("Refresh labels")
                 with gr.Row():
                     prev_btn = gr.Button("Previous")
                     skip_btn = gr.Button("Skip")
@@ -509,23 +573,24 @@ def build_review_app():
                 seed=int(seed_value),
             )
             records = sample.to_dict(orient="records")
-            img, md, label, note_value, prog = display_record(records, 0)
+            img, md, label, note_value, corrected_label_value, prog = display_record(records, 0)
             preview_cols = [
                 c for c in [
                     "crop_id", "score", "score_bin", "series", "image_label",
+                    "corrected_label",
                     "label", "pred_label", "pred_label_rate", "error_rate",
                     "detector_label", "file_title", "review_label", "reviewed_at",
                 ]
                 if c in sample.columns
             ]
-            return records, 0, img, md, label, note_value, prog, sample[preview_cols]
+            return records, 0, img, md, label, note_value, corrected_label_value, prog, sample[preview_cols]
 
         def score_col_for_review(score_source_value, loss_round_value, score_col_value):
             if score_source_value == "loss_round":
                 return f"loss_round:{str(loss_round_value).strip() or 'latest'}:{score_col_value}"
             return str(score_col_value)
 
-        def on_save_next(records, idx, label, note_value, score_source_value, loss_round_value, score_col_value):
+        def on_save_next(records, idx, label, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value):
             records = records or []
             if not records:
                 raise gr.Error("当前没有 sample，请先 Load / resample。")
@@ -538,32 +603,38 @@ def build_review_app():
                 row["crop_id"],
                 label,
                 note_value,
+                corrected_label_value,
                 score_col_for_review(score_source_value, loss_round_value, score_col_value),
             )
             row["review_label"] = label
             row["review_note"] = note_value
+            row["corrected_label"] = corrected_label_value if label == constants.NOISE_REVIEW_LABEL_WRONG_LABEL else None
             idx = idx + 1
-            img, md, next_label, next_note, prog = display_record(records, idx)
-            return records, idx, img, md, next_label, next_note, prog
+            img, md, next_label, next_note, next_corrected_label, prog = display_record(records, idx)
+            return records, idx, img, md, next_label, next_note, next_corrected_label, prog
 
-        def on_quick_save_next(records, idx, note_value, score_source_value, loss_round_value, score_col_value, label):
-            return on_save_next(records, idx, label, note_value, score_source_value, loss_round_value, score_col_value)
+        def on_quick_save_next(records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value, label):
+            return on_save_next(records, idx, label, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value)
 
         def on_skip(records, idx):
             records = records or []
             if not records:
                 return 0, *display_record(records, 0)
             idx = min(int(idx) + 1, len(records))
-            img, md, label, note_value, prog = display_record(records, idx)
-            return idx, img, md, label, note_value, prog
+            img, md, label, note_value, corrected_label_value, prog = display_record(records, idx)
+            return idx, img, md, label, note_value, corrected_label_value, prog
 
         def on_prev(records, idx):
             records = records or []
             if not records:
                 return 0, *display_record(records, 0)
             idx = max(0, int(idx) - 1)
-            img, md, label, note_value, prog = display_record(records, idx)
-            return idx, img, md, label, note_value, prog
+            img, md, label, note_value, corrected_label_value, prog = display_record(records, idx)
+            return idx, img, md, label, note_value, corrected_label_value, prog
+
+        def on_refresh_labels():
+            choices = known_label_choices()
+            return gr.update(choices=choices, value=None)
 
         refresh_score_cols_btn.click(
             on_refresh_score_columns,
@@ -578,57 +649,62 @@ def build_review_app():
         reload_btn.click(
             on_reload,
             inputs=[score_source, loss_round, score_col, skip_reviewed, density, bins, samples_per_bin, seed],
-            outputs=[records_state, idx_state, image, meta, review_label, note, progress, sample_table],
+            outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress, sample_table],
         )
         save_next_btn.click(
             on_save_next,
-            inputs=[records_state, idx_state, review_label, note, score_source, loss_round, score_col],
-            outputs=[records_state, idx_state, image, meta, review_label, note, progress],
+            inputs=[records_state, idx_state, review_label, note, corrected_label, score_source, loss_round, score_col],
+            outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
         )
         quick_ok_btn.click(
-            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_OK
+            lambda records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_OK
             ),
-            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
-            outputs=[records_state, idx_state, image, meta, review_label, note, progress],
+            inputs=[records_state, idx_state, note, corrected_label, score_source, loss_round, score_col],
+            outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
         )
         quick_wrong_label_btn.click(
-            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_WRONG_LABEL
+            lambda records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_WRONG_LABEL
             ),
-            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
-            outputs=[records_state, idx_state, image, meta, review_label, note, progress],
+            inputs=[records_state, idx_state, note, corrected_label, score_source, loss_round, score_col],
+            outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
         )
         quick_out_of_label_space_btn.click(
-            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE
+            lambda records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE
             ),
-            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
-            outputs=[records_state, idx_state, image, meta, review_label, note, progress],
+            inputs=[records_state, idx_state, note, corrected_label, score_source, loss_round, score_col],
+            outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
         )
         quick_bad_crop_btn.click(
-            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_BAD_CROP
+            lambda records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_BAD_CROP
             ),
-            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
-            outputs=[records_state, idx_state, image, meta, review_label, note, progress],
+            inputs=[records_state, idx_state, note, corrected_label, score_source, loss_round, score_col],
+            outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
         )
         quick_ambiguous_btn.click(
-            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_AMBIGUOUS
+            lambda records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_AMBIGUOUS
             ),
-            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
-            outputs=[records_state, idx_state, image, meta, review_label, note, progress],
+            inputs=[records_state, idx_state, note, corrected_label, score_source, loss_round, score_col],
+            outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
+        )
+        refresh_labels_btn.click(
+            on_refresh_labels,
+            inputs=[],
+            outputs=[corrected_label],
         )
         skip_btn.click(
             on_skip,
             inputs=[records_state, idx_state],
-            outputs=[idx_state, image, meta, review_label, note, progress],
+            outputs=[idx_state, image, meta, review_label, note, corrected_label, progress],
         )
         prev_btn.click(
             on_prev,
             inputs=[records_state, idx_state],
-            outputs=[idx_state, image, meta, review_label, note, progress],
+            outputs=[idx_state, image, meta, review_label, note, corrected_label, progress],
         )
 
     return app

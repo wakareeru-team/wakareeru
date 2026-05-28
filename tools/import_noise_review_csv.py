@@ -47,6 +47,8 @@ REVIEW_COLUMN_DEFS = {
     "noise_review_note": "TEXT",
     "noise_reviewed_at": "TEXT",
     "noise_review_score_col": "TEXT",
+    "manual_corrected_label": "TEXT",
+    "manual_corrected_at": "TEXT",
 }
 
 STABLE_KEY_COLUMNS = [
@@ -134,6 +136,10 @@ def load_review_csv(path: Path) -> pd.DataFrame:
         review_df["noise_reviewed_at"] = ""
     if "noise_review_score_col" not in review_df.columns:
         review_df["noise_review_score_col"] = ""
+    if "manual_corrected_label" not in review_df.columns:
+        review_df["manual_corrected_label"] = ""
+    if "manual_corrected_at" not in review_df.columns:
+        review_df["manual_corrected_at"] = ""
 
     return normalize_key_frame(review_df)
 
@@ -156,7 +162,8 @@ def load_db_review_targets(conn: sqlite3.Connection) -> pd.DataFrame:
             c.box_y1,
             c.box_x2,
             c.box_y2,
-            c.noise_review_label AS existing_review_label
+            c.noise_review_label AS existing_review_label,
+            c.manual_corrected_label AS existing_corrected_label
         FROM crops c
         JOIN images i ON i.id = c.image_id
         """,
@@ -214,16 +221,29 @@ def import_review_csv(
             matched = matched[~existing_mask].copy()
 
         now = datetime.now(timezone.utc).isoformat()
-        update_rows = [
-            (
-                row["noise_review_label"],
-                "" if pd.isna(row["noise_review_note"]) else str(row["noise_review_note"]),
-                now if pd.isna(row["noise_reviewed_at"]) or str(row["noise_reviewed_at"]).strip() == "" else str(row["noise_reviewed_at"]),
-                "" if pd.isna(row["noise_review_score_col"]) else str(row["noise_review_score_col"]),
-                int(row["crop_id"]),
+        update_rows = []
+        for _, row in matched.iterrows():
+            corrected_label = (
+                "" if pd.isna(row["manual_corrected_label"]) else str(row["manual_corrected_label"]).strip()
             )
-            for _, row in matched.iterrows()
-        ]
+            corrected_at = ""
+            if corrected_label:
+                corrected_at = (
+                    now
+                    if pd.isna(row["manual_corrected_at"]) or str(row["manual_corrected_at"]).strip() == ""
+                    else str(row["manual_corrected_at"])
+                )
+            update_rows.append(
+                (
+                    row["noise_review_label"],
+                    "" if pd.isna(row["noise_review_note"]) else str(row["noise_review_note"]),
+                    now if pd.isna(row["noise_reviewed_at"]) or str(row["noise_reviewed_at"]).strip() == "" else str(row["noise_reviewed_at"]),
+                    "" if pd.isna(row["noise_review_score_col"]) else str(row["noise_review_score_col"]),
+                    corrected_label,
+                    corrected_at,
+                    int(row["crop_id"]),
+                )
+            )
 
         if update_rows and not dry_run:
             conn.executemany(
@@ -232,7 +252,9 @@ def import_review_csv(
                 SET noise_review_label = ?,
                     noise_review_note = ?,
                     noise_reviewed_at = ?,
-                    noise_review_score_col = ?
+                    noise_review_score_col = ?,
+                    manual_corrected_label = ?,
+                    manual_corrected_at = ?
                 WHERE id = ?
                 """,
                 update_rows,
