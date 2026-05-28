@@ -192,6 +192,8 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 11. `stage_11_loss_analysis.py` 读取本轮 `label_map.json` 和 loss history，生成噪声筛查特征。
 12. `stage_14_store_crops.py` 保存最终 crop 图像，并在 `metadata.csv` 中写入 `manual_reviewed` 供评估集筛选；人工错标纠正会通过 crop 级 `manual_corrected_label` 覆盖训练和导出标签。
 
+噪声复核、人工纠正标签、LR 预测过滤和多轮 loss tracking 的完整设计见 [docs/noise_review_loop.md](docs/noise_review_loop.md)。
+
 主数据库为 `data/commons_image_manifest.sqlite`，关键表包括：
 
 - `categories`：每个系列解析到的 Commons 分类。
