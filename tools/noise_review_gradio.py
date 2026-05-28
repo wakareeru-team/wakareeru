@@ -160,8 +160,6 @@ def load_candidate_rows(
 ) -> pd.DataFrame:
     db_path = db_path or DB_PATH
     ensure_review_columns(db_path)
-    if corrected_label and corrected_label not in set(known_label_choices(db_path)):
-        raise gr.Error(f"Correct label 不在当前已知标签中: {corrected_label}")
     with sqlite3.connect(db_path) as conn:
         cols = crop_columns(conn)
         if score_col not in cols:
@@ -449,6 +447,8 @@ def save_review(
 
     db_path = db_path or DB_PATH
     ensure_review_columns(db_path)
+    if corrected_label and corrected_label not in set(known_label_choices(db_path)):
+        raise gr.Error(f"Correct label 不在当前已知标签中: {corrected_label}")
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             f"""
