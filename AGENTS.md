@@ -79,10 +79,12 @@ docker buildx build --platform linux/amd64 -f Dockerfile.basepod -t wakareeru-ba
 python pipeline_entry.py
 ```
 
-只运行一个阶段：
+只运行一个阶段或多个阶段：
 
 ```bash
-python pipeline_entry.py --only siglip_filter
+python pipeline_entry.py --stages "5"
+python pipeline_entry.py --stages "5 10 11"
+python pipeline_entry.py --stages "9-13"
 ```
 
 从某阶段继续运行：
@@ -134,6 +136,11 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 | `llm_labeling` | `stage_06_llm_metadata_labeling.py` | 用 OpenAI API 从分类路径抽取番台、子型号、运营公司等元数据 |
 | `fine_grain_series` | `stage_08_fine_grain_series.py` | 根据 LLM 元数据和人工规则构造 `fine_grained_series` |
 | `gdino_bbox` | `stage_07_gdino_bbox.py` | 用 Grounding-DINO 检测车辆主体并写入 `crops` |
+| `feature_extraction` | `stage_09_DINOv3_feature_extraction.py` | 提取 crop 图像 DINOv3 特征，只缓存 `features` 与 `crop_ids`，不绑定标签体系 |
+| `loss_tracking` | `stage_10_train_loss_tracking.py` | 从当前数据库标签动态生成本轮 label id，训练线性头并记录 loss |
+| `loss_analysis` | `stage_11_loss_analysis.py` | 读取本轮 `label_map.json` 和 loss history，聚合噪声筛查特征 |
+| `logistic_regression_filter` | `stage_12_logistic_regression_filter.py` | 基于人工复核标签训练 Logistic Regression 噪声筛选器 |
+| `lr_prediction` | `stage_13_lr_prediction.py` | 对未复核样本生成 LR 噪声预测 CSV，并可选同步到数据库 |
 | `store_crops` | `stage_14_store_crops.py` | 将 crop 图像保存为最终数据集，并生成 `metadata.csv` / `labels.csv`；`metadata.manual_reviewed` 表示人工复核为 `ok` 的高确信样本 |
 
 `pipeline/deprecated_stage_08_siglip_crop_filtering.py` 是弃用阶段，不应作为默认流程的一部分。
@@ -144,7 +151,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 `stage_02` 使用 `config/manual_series_overrides.csv` 处理 Commons 命名差异、系列合并和人工修正。与 Commons 分类名相关的规则集中在 `pipeline/constants.py` 和 stage 脚本中；需要修改时先读现有逻辑，不要只凭文件名字符串硬编码。
 
-`fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/manual_fine_grained_series.csv` 和 `fine_grain_series.rules_path` 配置。
+`fine_grained_series` 用于更细粒度的训练标签；规则来源见 `config/manual_fine_grained_series.csv` 和 `fine_grain_series.rules_path` 配置。DINOv3 特征缓存只绑定 crop 图像和 `crop_id`，修改细粒度标签规则后通常只需重跑 `fine_grain_series`、`loss_tracking` 与后续噪声分析阶段，不需要重跑 `feature_extraction`。
 
 ## 数据库概要
 
@@ -176,7 +183,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `llm_labeling.*` 控制 OpenAI 元数据抽取，包括是否为 Responses API 启用 `web_search` 工具。
 - `fine_grain_series.*` 控制细粒度车型标签规则。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
-- `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。
+- `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。
 

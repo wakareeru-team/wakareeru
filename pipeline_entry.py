@@ -33,7 +33,7 @@ STAGES: dict[str, tuple[str, callable]] = { #type: ignore
     "siglip_filter":          ("SigLIP2 image filtering", stage_05.main),
     "llm_labeling":          ("LLM 车型信息解析",    stage_06.main),
     "gdino_bbox":     ("Grounding-DINO 主体裁切与后处理", stage_07.main),
-    "fine_grain_series":     ("细粒度车型标签构造", stage_08.main), # 独立出来是因为它直接影响后续的label空间和模型训练，调整后后面的feature分类和模型训练都要重跑
+    "fine_grain_series":     ("细粒度车型标签构造", stage_08.main), # 影响后续label空间和模型训练；DINO特征缓存只绑定crop_id，不需随标签规则重跑
     "feature_extraction":    ("DINOv3 特征提取",     stage_09.main),
     "loss_tracking":         ("训练与损失跟踪",     stage_10.main),
     "loss_analysis":         ("损失分析",          stage_11.main),

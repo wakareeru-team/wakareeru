@@ -131,10 +131,12 @@ cp .env.example .env
 python pipeline_entry.py
 ```
 
-只运行某一阶段：
+只运行某一阶段或多个阶段：
 
 ```bash
-python pipeline_entry.py --only siglip_filter
+python pipeline_entry.py --stages "5"
+python pipeline_entry.py --stages "5 10 11"
+python pipeline_entry.py --stages "9-13"
 ```
 
 从某一阶段继续运行到最后：
@@ -168,6 +170,11 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 | `llm_labeling` | 用 OpenAI API 从分类路径抽取结构化元数据 |
 | `fine_grain_series` | 根据人工规则构造 `fine_grained_series` 标签 |
 | `gdino_bbox` | 用 Grounding-DINO 检测车辆主体并写入裁切框 |
+| `feature_extraction` | 提取 crop 图像 DINOv3 特征，只缓存 `features` 与 `crop_ids` |
+| `loss_tracking` | 按当前数据库标签动态生成本轮 label id，训练线性头并记录 loss |
+| `loss_analysis` | 聚合 loss 特征并生成噪声筛查分数 |
+| `logistic_regression_filter` | 基于人工复核标签训练 LR 噪声筛选器 |
+| `lr_prediction` | 生成 LR 噪声预测 CSV，并可选同步数据库 |
 | `store_crops` | 保存最终 crop 图像并生成 `metadata.csv` / `labels.csv`，其中 `manual_reviewed` 标记人工复核为 `ok` 的样本 |
 
 ## 数据流
@@ -180,7 +187,10 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 6. `stage_06_llm_metadata_labeling.py` 使用 OpenAI 模型解析分类路径中的番台、运营公司、特殊涂装等信息。
 7. `stage_08_fine_grain_series.py` 根据 LLM 元数据和人工规则构造 `fine_grained_series`。
 8. `stage_07_gdino_bbox.py` 使用 `IDEA-Research/grounding-dino-base` 生成车辆主体 bbox 与裁切记录。
-9. `stage_14_store_crops.py` 保存最终 crop 图像，并在 `metadata.csv` 中写入 `manual_reviewed` 供评估集筛选。
+9. `stage_09_DINOv3_feature_extraction.py` 提取 crop 图像特征，缓存 `features` 与 `crop_ids`，不绑定细粒度标签。
+10. `stage_10_train_loss_tracking.py` 按当前数据库标签动态生成本轮 label id，训练线性头并记录 loss。
+11. `stage_11_loss_analysis.py` 读取本轮 `label_map.json` 和 loss history，生成噪声筛查特征。
+12. `stage_14_store_crops.py` 保存最终 crop 图像，并在 `metadata.csv` 中写入 `manual_reviewed` 供评估集筛选。
 
 主数据库为 `data/commons_image_manifest.sqlite`，关键表包括：
 
@@ -198,7 +208,7 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 - `llm_labeling.openai_model_name` 控制 LLM 元数据抽取模型。
 - `fine_grain_series.rules_path` 控制细粒度车型标签规则 CSV，默认是 `config/manual_fine_grained_series.csv`。
 - `gdino.model_name`、`box_threshold`、`nms_iou_threshold` 控制主体检测。
-- `noise_detection` 用于后续 DINO 特征缓存与 small-loss trick 噪声检测实验。
+- `noise_detection` 用于后续 DINO 特征缓存与 small-loss trick 噪声检测实验；特征缓存只绑定 crop 图像和 `crop_id`，训练标签 id 在 loss tracking 轮次中动态生成。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列，默认包含 `manual_reviewed`。
 
 ## 开发命令

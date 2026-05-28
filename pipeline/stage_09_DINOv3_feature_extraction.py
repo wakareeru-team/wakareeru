@@ -205,16 +205,14 @@ class CropImageDataset(torch.utils.data.Dataset):
 
 
 class FeatureCollator:
-    def __init__(self, processor, label_to_id: dict[str, int]):
+    def __init__(self, processor):
         self.processor = processor
-        self.label_to_id = label_to_id
 
     def __call__(self, batch):
         images, metas = zip(*batch)
         image_tensors = self.processor(images=list(images), return_tensors="pt")["pixel_values"]
-        labels = torch.tensor([self.label_to_id[str(meta["label"])] for meta in metas], dtype=torch.long)
         crop_ids = torch.tensor([int(meta["crop_id"]) for meta in metas], dtype=torch.long)
-        return image_tensors, labels, crop_ids
+        return image_tensors, crop_ids
 
 
 
@@ -233,7 +231,6 @@ def main(config=None):
     noise_detection_cfg = config['noise_detection']
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     device = get_torch_device()
-    label_granularity = noise_detection_cfg["label_granularity"]
     feature_cache_dir = utils.join_data_root(
         noise_detection_cfg["feature_cache_dir"],
         config=config,
@@ -246,7 +243,6 @@ def main(config=None):
     df_crops = load_crop_manifest(
     db_path=db_path,
     series= None if noise_detection_cfg["full_series"] else noise_detection_cfg["series_test_scope"],
-    label_granularity=label_granularity,
     )
     
     pretrained_model_name = noise_detection_cfg["hf_model_name"]
@@ -257,11 +253,6 @@ def main(config=None):
     )
     logger.info(f'已加载特征提取模型: {pretrained_model_name}，在加速设备上运行: {device}。准备开始特征提取...')
     
-    
-    labels = sorted(df_crops['label'].dropna().astype(str).unique())
-    label_to_id = {label: idx for idx, label in enumerate(labels)}
-    id_to_label = {idx: label for label, idx in label_to_id.items()}
-        
     
     embed_dim = model.config.hidden_size
     logger.info(f"模型输出特征维度: {embed_dim}。开始处理 {len(df_crops)} 个crop...")
@@ -281,25 +272,23 @@ def main(config=None):
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=FeatureCollator(processor, label_to_id),
+        collate_fn=FeatureCollator(processor),
         num_workers=noise_detection_cfg["extration_workers"],
     )
     
     data_length = df_crops.shape[0]
-    class_num = len(label_to_id)
-    file_name = f"demo_dinov3_features_{data_length}crops_{class_num}labels.pt"
+    file_name = f"demo_dinov3_features_{data_length}crops.pt"
     feature_cache_dir.mkdir(parents=True, exist_ok=True)
     shard_dir = feature_cache_dir / "shards" / f"{Path(file_name).stem}_{time.strftime('%Y%m%d-%H%M%S', time.localtime())}"
     logger.info("特征将先按每片最多 %d 个样本保存到 %s", shard_size, shard_dir)
 
     shard_features = []
-    shard_labels = []
     shard_crop_ids = []
     shard_sample_count = 0
     shard_index = 0
 
     def flush_feature_shard() -> None:
-        nonlocal shard_features, shard_labels, shard_crop_ids, shard_sample_count, shard_index
+        nonlocal shard_features, shard_crop_ids, shard_sample_count, shard_index
         if shard_sample_count == 0:
             return
         shard_path = utils.save_pt_shard(
@@ -307,13 +296,11 @@ def main(config=None):
             shard_index,
             {
                 "features": torch.cat(shard_features, dim=0),
-                "labels": torch.cat(shard_labels, dim=0),
                 "crop_ids": torch.cat(shard_crop_ids, dim=0),
             },
         )
         logger.info("已保存特征分片 %s，样本数=%d", shard_path.name, shard_sample_count)
         shard_features = []
-        shard_labels = []
         shard_crop_ids = []
         shard_sample_count = 0
         shard_index += 1
@@ -322,14 +309,13 @@ def main(config=None):
     with torch.inference_mode():
         for batch in tqdm(dataloader, total=len(dataloader), desc="DINOv3 feature extraction", unit="batch"):
             
-            image_tensors, labels, crop_ids = batch
+            image_tensors, crop_ids = batch
             image_tensors = image_tensors.to(model.device)
             outputs = model(image_tensors)
             
             pooled_output = outputs.pooler_output #CLS output
             
             shard_features.append(pooled_output.cpu())
-            shard_labels.append(labels.cpu())
             shard_crop_ids.append(crop_ids.cpu())
             shard_sample_count += int(crop_ids.numel())
             if shard_sample_count >= shard_size:
@@ -340,16 +326,16 @@ def main(config=None):
 
     # saving
 
-    logger.info(f"特征提取完成。共处理 {len(df_crops)} 个crop，提取标签共{class_num}。开始聚合特征分片...")
+    logger.info(f"特征提取完成。共处理 {len(df_crops)} 个crop。开始聚合特征分片...")
     feature_cache = utils.aggregate_pt_shards(
         shard_dir,
         feature_cache_dir / file_name,
-        tensor_keys=["features", "labels", "crop_ids"],
+        tensor_keys=["features", "crop_ids"],
         metadata={
-            "label_to_id": label_to_id,
-            "id_to_label": id_to_label,
             "model_name": pretrained_model_name,
             "shard_dir": str(shard_dir),
+            "crop_pad_frac": noise_detection_cfg["crop_pad_frac"],
+            "feature_schema_version": 2,
         },
     )
     latest_feature_cache_path.write_text(file_name, encoding="utf-8")

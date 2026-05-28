@@ -114,6 +114,104 @@ class FeatureDataset(torch.utils.data.Dataset):
             return self.features[idx], self.labels[idx], self.crop_ids[idx]
 
 
+def load_current_crop_labels(
+    db_path: Path,
+    crop_ids: list[int],
+    label_granularity: str,
+    chunk_size: int = 900,
+) -> pd.DataFrame:
+    if label_granularity == "submodel":
+        label_expr = "COALESCE(i.submodel, i.fine_grained_series, c.series)"
+    elif label_granularity == "fine_grained_series":
+        label_expr = "COALESCE(i.fine_grained_series, c.series)"
+    elif label_granularity == "series":
+        label_expr = "c.series"
+    else:
+        raise ValueError(
+            "noise_detection.label_granularity must be one of: "
+            "series, fine_grained_series, submodel"
+        )
+
+    rows = []
+    with sqlite3.connect(db_path) as conn:
+        for start in range(0, len(crop_ids), chunk_size):
+            chunk = crop_ids[start:start + chunk_size]
+            placeholders = ",".join(["?"] * len(chunk))
+            sql = f"""
+                SELECT
+                    c.id AS crop_id,
+                    {label_expr} AS label
+                FROM crops c
+                JOIN images i ON i.id = c.image_id
+                WHERE c.id IN ({placeholders})
+            """
+            rows.append(pd.read_sql_query(sql, conn, params=chunk))
+
+    if not rows:
+        return pd.DataFrame(columns=["crop_id", "label"])
+    labels = pd.concat(rows, ignore_index=True)
+    labels["crop_id"] = labels["crop_id"].astype(int)
+    return labels
+
+
+def attach_current_labels_to_feature_cache(
+    feature_cache: dict,
+    db_path: Path,
+    label_granularity: str,
+) -> dict:
+    features = feature_cache["features"].float()
+    crop_ids = feature_cache["crop_ids"].long()
+    crop_id_list = [int(crop_id) for crop_id in crop_ids.tolist()]
+    labels_df = load_current_crop_labels(
+        db_path=db_path,
+        crop_ids=crop_id_list,
+        label_granularity=label_granularity,
+    )
+    order_df = pd.DataFrame({"crop_id": crop_id_list, "feature_index": range(len(crop_id_list))})
+    labeled = order_df.merge(labels_df, on="crop_id", how="left")
+    labeled["label"] = labeled["label"].astype("string").str.strip()
+    keep = labeled["label"].notna() & (labeled["label"] != "")
+    if not keep.any():
+        raise ValueError("No feature cache crops have usable current labels")
+
+    skipped = int((~keep).sum())
+    labeled = labeled.loc[keep].copy()
+    feature_indices = torch.tensor(labeled["feature_index"].to_numpy(), dtype=torch.long)
+    labels = labeled["label"].astype(str)
+    label_names = sorted(labels.unique())
+    label_to_id = {label: idx for idx, label in enumerate(label_names)}
+    id_to_label = {idx: label for label, idx in label_to_id.items()}
+
+    return {
+        **feature_cache,
+        "features": features.index_select(0, feature_indices),
+        "crop_ids": torch.tensor(labeled["crop_id"].to_numpy(), dtype=torch.long),
+        "labels": torch.tensor(labels.map(label_to_id).to_numpy(), dtype=torch.long),
+        "label_to_id": label_to_id,
+        "id_to_label": id_to_label,
+        "skipped_unlabeled_count": skipped,
+    }
+
+
+def save_label_map(
+    loss_dir: Path,
+    label_granularity: str,
+    label_to_id: dict[str, int],
+    id_to_label: dict[int, str],
+) -> Path:
+    label_map_path = loss_dir / "label_map.json"
+    payload = {
+        "label_granularity": label_granularity,
+        "label_to_id": label_to_id,
+        "id_to_label": {str(idx): label for idx, label in id_to_label.items()},
+    }
+    label_map_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return label_map_path
+
+
 
 
 def main(config: dict | None = None) -> None:
@@ -152,10 +250,28 @@ def main(config: dict | None = None) -> None:
     
 
     feature_cache_file = resolve_feature_cache_file(active_feature_cache_file, latest_feature_cache_path)
-    feature_cache = torch.load(feature_cache_dir / feature_cache_file, map_location="cpu")
+    raw_feature_cache = torch.load(feature_cache_dir / feature_cache_file, map_location="cpu")
+    feature_cache = attach_current_labels_to_feature_cache(
+        raw_feature_cache,
+        db_path=db_path,
+        label_granularity=noise_detection_cfg["label_granularity"],
+    )
     label_to_id = feature_cache['label_to_id']
     id_to_label = feature_cache['id_to_label']
-    logger.info(f'已加载特征缓存，包含 {len(feature_cache["features"])} 个样本，标签类别数: {len(label_to_id)}')
+    label_map_path = save_label_map(
+        loss_dir,
+        noise_detection_cfg["label_granularity"],
+        label_to_id,
+        id_to_label,
+    )
+    logger.info(
+        "已加载特征缓存 %s，当前可训练样本=%d，跳过无标签样本=%d，标签类别数=%d，label map=%s",
+        feature_cache_file,
+        len(feature_cache["features"]),
+        feature_cache["skipped_unlabeled_count"],
+        len(label_to_id),
+        label_map_path,
+    )
 
     
 

@@ -110,28 +110,23 @@ def main(config: dict | None = None) -> None:
     noise_detection_cfg = config['noise_detection']
     utils.init_db(config=config)
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
-    df_crops = load_crop_manifest(db_path, label_granularity=noise_detection_cfg['label_granularity'])
     loss_noise_tracking_cfg = config['loss_noise_tracking']
     logger.info("开始提取损失分析数据")
     
-    df_crops = load_crop_manifest(
-    db_path=db_path,
-    series= None if noise_detection_cfg.get("full_series") else noise_detection_cfg.get("series_test_scope"),
-    label_granularity=noise_detection_cfg['label_granularity'],
-    )
-    loss_tracking_path = utils.get_current_loss_round_dir(config) / loss_noise_tracking_cfg["loss_history_file_name"]
-    epoch_tracking_path = utils.get_current_loss_round_dir(config) / loss_noise_tracking_cfg["epoch_history_file_name"]
+    loss_round_dir = utils.get_current_loss_round_dir(config)
+    loss_tracking_path = loss_round_dir / loss_noise_tracking_cfg["loss_history_file_name"]
+    epoch_tracking_path = loss_round_dir / loss_noise_tracking_cfg["epoch_history_file_name"]
+    label_map_path = loss_round_dir / "label_map.json"
     lossdf = pd.read_csv(utils.join_data_root(loss_tracking_path))
     epochdf = pd.read_csv(utils.join_data_root(epoch_tracking_path))
+    if not label_map_path.exists():
+        raise FileNotFoundError(f"Expected label map not found: {label_map_path}")
+    label_map = json.loads(label_map_path.read_text(encoding="utf-8"))
+    id_to_label = label_map["id_to_label"]
 
 
-    LABEL_COL = "label"
-    labels = sorted(df_crops[LABEL_COL].dropna().astype(str).unique())
-    label_to_id = {label: idx for idx, label in enumerate(labels)}
-    id_to_label = {idx: label for label, idx in label_to_id.items()}
-
-
-    lossdf['pred_label'] = lossdf['pred_id'].apply(lambda x: id_to_label[x])
+    lossdf['pred_label'] = lossdf['pred_id'].apply(lambda x: id_to_label[str(int(x))])
+    lossdf['label'] = lossdf['label_id'].apply(lambda x: id_to_label[str(int(x))])
 
 
     # 聚合crop 损失特征
@@ -166,24 +161,22 @@ def main(config: dict | None = None) -> None:
     loss_feature = loss_feature.merge(error_rate, on="crop_id", how="left")
     loss_feature = loss_feature.merge(pred_summary, on="crop_id", how="left")
     loss_feature = loss_feature.merge(tail_loss, on="crop_id", how="left")
-    crop_labels = df_crops[["crop_id", "label"]].drop_duplicates("crop_id")
+    crop_labels = lossdf[["crop_id", "label"]].drop_duplicates("crop_id")
     loss_feature = loss_feature.merge(crop_labels, on="crop_id", how="left")
 
     
     # inter-label loss quantile分析
     loss_feature['loss_mean_pct_in_label'] = loss_feature.groupby('label')['mean'].rank(pct=True)
-    loss_feature.head(10)
-    loss_feature_path = utils.get_current_loss_round_dir(config) / config['loss_analysis']['loss_feature_file_name']
-    loss_feature.to_csv(utils.join_data_root(loss_feature_path), index=False)
-    logger.info("已提取%d条损失分析数据，包含loss趋势，尾部均值，模型预测和inter label percentile.", len(loss_feature))
-    logger.info("损失分析数据提取完成，保存至 %s", loss_feature_path)
-
 
     # v1最简评分
     loss_feature["noise_score_v1"] = (
         loss_feature["loss_mean_pct_in_label"] +
         loss_feature["error_rate"]
     )
+    loss_feature_path = loss_round_dir / config['loss_analysis']['loss_feature_file_name']
+    loss_feature.to_csv(utils.join_data_root(loss_feature_path), index=False)
+    logger.info("已提取%d条损失分析数据，包含loss趋势，尾部均值，模型预测和inter label percentile.", len(loss_feature))
+    logger.info("损失分析数据提取完成，保存至 %s", loss_feature_path)
     
     # 保存到数据库
     
