@@ -29,6 +29,8 @@ from pipeline import constants, utils  # noqa: E402
 
 
 REVIEW_CONFIG = {
+    "score_source": "db",  # db | loss_round
+    "loss_round": "latest",
     "score_col": "noise_score_v1",
     "skip_reviewed": True,
     "sampling_density": "quantile",  # quantile | linear | high_dense
@@ -88,6 +90,35 @@ def score_columns(db_path: Path | None = None) -> list[str]:
     return preferred + numeric
 
 
+def _numeric_columns(df: pd.DataFrame) -> list[str]:
+    return [
+        col for col in df.columns
+        if pd.api.types.is_numeric_dtype(df[col]) and col != "crop_id"
+    ]
+
+
+def load_loss_round_features(loss_round: str) -> pd.DataFrame:
+    round_dir = utils.get_loss_round_dir(config=CONFIG, active_round=loss_round)
+    feature_path = round_dir / CONFIG["loss_analysis"]["loss_feature_file_name"]
+    if not feature_path.exists():
+        raise FileNotFoundError(f"Loss feature CSV not found: {feature_path}")
+
+    features = pd.read_csv(feature_path)
+    if (
+        "noise_score_v1" not in features.columns
+        and {"loss_mean_pct_in_label", "error_rate"}.issubset(features.columns)
+    ):
+        features["noise_score_v1"] = features["loss_mean_pct_in_label"] + features["error_rate"]
+    return features
+
+
+def loss_round_score_columns(loss_round: str) -> list[str]:
+    features = load_loss_round_features(loss_round)
+    preferred = [col for col in ["noise_score_v1", "loss_mean_pct_in_label", "error_rate", "mean", "loss_tail_mean"] if col in features.columns]
+    others = [col for col in _numeric_columns(features) if col not in preferred]
+    return preferred + others
+
+
 def load_candidate_rows(
     score_col: str,
     skip_reviewed: bool = True,
@@ -138,6 +169,81 @@ def load_candidate_rows(
             ORDER BY score DESC
         """
         return pd.read_sql_query(sql, conn)
+
+
+def load_candidate_rows_from_loss_round(
+    loss_round: str,
+    score_col: str,
+    skip_reviewed: bool = True,
+    db_path: Path | None = None,
+) -> pd.DataFrame:
+    db_path = db_path or DB_PATH
+    ensure_review_columns(db_path)
+    features = load_loss_round_features(loss_round)
+    if "crop_id" not in features.columns:
+        raise ValueError("loss feature CSV missing required column: crop_id")
+    if score_col not in features.columns:
+        raise ValueError(f"score_col={score_col!r} not found in loss feature CSV")
+
+    feature_cols = []
+    for col in [
+        "crop_id",
+        score_col,
+        "label",
+        "pred_label",
+        "pred_label_rate",
+        "mean",
+        "loss_tail_mean",
+        "error_rate",
+        "loss_mean_pct_in_label",
+    ]:
+        if col in features.columns and col not in feature_cols:
+            feature_cols.append(col)
+    score_features = features[feature_cols].copy()
+    score_features = score_features.rename(columns={score_col: "score"})
+    score_features["crop_id"] = score_features["crop_id"].astype(int)
+
+    with sqlite3.connect(db_path) as conn:
+        review_label_col = quote_ident(REVIEW_CONFIG["review_label_col"])
+        review_note_col = quote_ident(REVIEW_CONFIG["review_note_col"])
+        reviewed_at_col = quote_ident(REVIEW_CONFIG["reviewed_at_col"])
+        where = ["i.downloaded_path IS NOT NULL"]
+        sql = f"""
+            SELECT
+                c.id AS crop_id,
+                c.image_id,
+                c.series,
+                c.power_type,
+                c.crop_index,
+                c.detector_label,
+                c.detector_score,
+                c.box_x1,
+                c.box_y1,
+                c.box_x2,
+                c.box_y2,
+                c.box_area,
+                c.crop_status,
+                c.crop_reason,
+                c.{review_label_col} AS review_label,
+                c.{review_note_col} AS review_note,
+                c.{reviewed_at_col} AS reviewed_at,
+                i.file_title,
+                i.downloaded_path,
+                COALESCE(i.fine_grained_series, i.series) AS image_label,
+                i.category
+            FROM crops c
+            JOIN images i ON i.id = c.image_id
+            WHERE {' AND '.join(where)}
+            ORDER BY c.id
+        """
+        metadata = pd.read_sql_query(sql, conn)
+
+    candidates = metadata.merge(score_features, on="crop_id", how="inner")
+    if skip_reviewed:
+        candidates = candidates[
+            candidates["review_label"].isna() | (candidates["review_label"].astype(str).str.strip() == "")
+        ].copy()
+    return candidates.sort_values("score", ascending=False).reset_index(drop=True)
 
 
 def assign_score_bins(df: pd.DataFrame, bins: int, density: str) -> pd.Series:
@@ -191,6 +297,8 @@ def stratified_sample_rows(
 
 
 def load_review_sample(
+    score_source: str,
+    loss_round: str,
     score_col: str,
     skip_reviewed: bool,
     density: str,
@@ -198,7 +306,14 @@ def load_review_sample(
     samples_per_bin: int,
     seed: int,
 ) -> pd.DataFrame:
-    candidates = load_candidate_rows(score_col=score_col, skip_reviewed=skip_reviewed)
+    if score_source == "loss_round":
+        candidates = load_candidate_rows_from_loss_round(
+            loss_round=loss_round,
+            score_col=score_col,
+            skip_reviewed=skip_reviewed,
+        )
+    else:
+        candidates = load_candidate_rows(score_col=score_col, skip_reviewed=skip_reviewed)
     return stratified_sample_rows(
         candidates,
         bins=bins,
@@ -234,6 +349,11 @@ def row_markdown(row: dict[str, Any], idx: int, total: int) -> str:
         ("score_bin", row.get("score_bin")),
         ("series", row.get("series")),
         ("image_label", row.get("image_label")),
+        ("loss_label", row.get("label")),
+        ("pred_label", row.get("pred_label")),
+        ("pred_label_rate", f"{float(row.get('pred_label_rate')):.4f}" if pd.notna(row.get("pred_label_rate")) else None),
+        ("error_rate", f"{float(row.get('error_rate')):.4f}" if pd.notna(row.get("error_rate")) else None),
+        ("loss_tail_mean", f"{float(row.get('loss_tail_mean')):.4f}" if pd.notna(row.get("loss_tail_mean")) else None),
         ("power_type", row.get("power_type")),
         ("detector", row.get("detector_label")),
         ("detector_score", f"{float(row.get('detector_score')):.4f}" if pd.notna(row.get("detector_score")) else None),
@@ -307,9 +427,20 @@ def build_review_app():
                 score_col = gr.Dropdown(
                     choices=score_choices,
                     value=default_score_col,
-                    label="Noise score source (DB column)",
+                    label="Score column",
                     allow_custom_value=True,
                 )
+                score_source = gr.Radio(
+                    choices=["db", "loss_round"],
+                    value=REVIEW_CONFIG["score_source"],
+                    label="Score source",
+                )
+                loss_round = gr.Textbox(
+                    value=REVIEW_CONFIG["loss_round"],
+                    label="Loss round",
+                    placeholder="latest or 20260528_214343",
+                )
+                refresh_score_cols_btn = gr.Button("Refresh score columns")
                 skip_reviewed = gr.Checkbox(
                     value=REVIEW_CONFIG["skip_reviewed"],
                     label="Skip already reviewed crops",
@@ -356,8 +487,20 @@ def build_review_app():
 
         sample_table = gr.Dataframe(label="Current sampled rows", interactive=False, wrap=True)
 
-        def on_reload(score_col_value, skip_value, density_value, bins_value, samples_per_bin_value, seed_value):
+        def on_refresh_score_columns(score_source_value, loss_round_value):
+            if score_source_value == "loss_round":
+                choices = loss_round_score_columns(str(loss_round_value).strip() or "latest")
+            else:
+                choices = score_columns()
+            value = REVIEW_CONFIG["score_col"] if REVIEW_CONFIG["score_col"] in choices else (
+                choices[0] if choices else None
+            )
+            return gr.update(choices=choices, value=value)
+
+        def on_reload(score_source_value, loss_round_value, score_col_value, skip_value, density_value, bins_value, samples_per_bin_value, seed_value):
             sample = load_review_sample(
+                score_source=score_source_value,
+                loss_round=str(loss_round_value).strip() or "latest",
                 score_col=score_col_value,
                 skip_reviewed=bool(skip_value),
                 density=density_value,
@@ -370,13 +513,19 @@ def build_review_app():
             preview_cols = [
                 c for c in [
                     "crop_id", "score", "score_bin", "series", "image_label",
+                    "label", "pred_label", "pred_label_rate", "error_rate",
                     "detector_label", "file_title", "review_label", "reviewed_at",
                 ]
                 if c in sample.columns
             ]
             return records, 0, img, md, label, note_value, prog, sample[preview_cols]
 
-        def on_save_next(records, idx, label, note_value, score_col_value):
+        def score_col_for_review(score_source_value, loss_round_value, score_col_value):
+            if score_source_value == "loss_round":
+                return f"loss_round:{str(loss_round_value).strip() or 'latest'}:{score_col_value}"
+            return str(score_col_value)
+
+        def on_save_next(records, idx, label, note_value, score_source_value, loss_round_value, score_col_value):
             records = records or []
             if not records:
                 raise gr.Error("当前没有 sample，请先 Load / resample。")
@@ -385,15 +534,20 @@ def build_review_app():
                 raise gr.Error("这一批样本已经全部 review 完成。")
             idx = max(0, idx)
             row = records[idx]
-            save_review(row["crop_id"], label, note_value, score_col_value)
+            save_review(
+                row["crop_id"],
+                label,
+                note_value,
+                score_col_for_review(score_source_value, loss_round_value, score_col_value),
+            )
             row["review_label"] = label
             row["review_note"] = note_value
             idx = idx + 1
             img, md, next_label, next_note, prog = display_record(records, idx)
             return records, idx, img, md, next_label, next_note, prog
 
-        def on_quick_save_next(records, idx, note_value, score_col_value, label):
-            return on_save_next(records, idx, label, note_value, score_col_value)
+        def on_quick_save_next(records, idx, note_value, score_source_value, loss_round_value, score_col_value, label):
+            return on_save_next(records, idx, label, note_value, score_source_value, loss_round_value, score_col_value)
 
         def on_skip(records, idx):
             records = records or []
@@ -411,49 +565,59 @@ def build_review_app():
             img, md, label, note_value, prog = display_record(records, idx)
             return idx, img, md, label, note_value, prog
 
+        refresh_score_cols_btn.click(
+            on_refresh_score_columns,
+            inputs=[score_source, loss_round],
+            outputs=[score_col],
+        )
+        score_source.change(
+            on_refresh_score_columns,
+            inputs=[score_source, loss_round],
+            outputs=[score_col],
+        )
         reload_btn.click(
             on_reload,
-            inputs=[score_col, skip_reviewed, density, bins, samples_per_bin, seed],
+            inputs=[score_source, loss_round, score_col, skip_reviewed, density, bins, samples_per_bin, seed],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress, sample_table],
         )
         save_next_btn.click(
             on_save_next,
-            inputs=[records_state, idx_state, review_label, note, score_col],
+            inputs=[records_state, idx_state, review_label, note, score_source, loss_round, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         quick_ok_btn.click(
-            lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_OK
+            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_OK
             ),
-            inputs=[records_state, idx_state, note, score_col],
+            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         quick_wrong_label_btn.click(
-            lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_WRONG_LABEL
+            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_WRONG_LABEL
             ),
-            inputs=[records_state, idx_state, note, score_col],
+            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         quick_out_of_label_space_btn.click(
-            lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE
+            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_OUT_OF_LABEL_SPACE
             ),
-            inputs=[records_state, idx_state, note, score_col],
+            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         quick_bad_crop_btn.click(
-            lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_BAD_CROP
+            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_BAD_CROP
             ),
-            inputs=[records_state, idx_state, note, score_col],
+            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         quick_ambiguous_btn.click(
-            lambda records, idx, note_value, score_col_value: on_quick_save_next(
-                records, idx, note_value, score_col_value, constants.NOISE_REVIEW_LABEL_AMBIGUOUS
+            lambda records, idx, note_value, score_source_value, loss_round_value, score_col_value: on_quick_save_next(
+                records, idx, note_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_AMBIGUOUS
             ),
-            inputs=[records_state, idx_state, note, score_col],
+            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, progress],
         )
         skip_btn.click(
