@@ -333,7 +333,7 @@ def placeholder_image(message: str, size: tuple[int, int] = (512, 384)) -> Image
 def load_crop_image(row: dict[str, Any], pad_frac: float | None = None) -> Image.Image:
     pad = REVIEW_CONFIG["pad_frac"] if pad_frac is None else float(pad_frac)
     try:
-        return utils.load_crop(row, img_root=DATA_ROOT, pad_frac=pad)
+        return utils.load_crop(row, config=CONFIG, pad_frac=pad)
     except Exception as exc:
         return placeholder_image(f"Failed to load crop_id={row.get('crop_id')}\n{exc}")
 

@@ -129,14 +129,11 @@ def load_img_with_orientation(path):
 
 def _source_image_path(
     row: pd.Series | dict,
-    img_root: Path | None = None,
     config: dict | None = None,
 ) -> Path:
     path = Path(str(row["downloaded_path"]).replace("\\", "/"))
     if path.is_absolute():
         return path
-    if img_root is not None:
-        return Path(img_root) / path
     return join_data_root(path, config=config)
 
 
@@ -163,12 +160,11 @@ def crop_from_image(
 
 def load_crop(
     row: pd.Series | dict,
-    img_root: Path | None = None,
     config: dict | None = None,
     pad_frac: float = 0.04,
 ) -> Image.Image:
     img = load_img_with_orientation(
-        _source_image_path(row, img_root=img_root, config=config)
+        _source_image_path(row, config=config)
     )
     return crop_from_image(img, row, pad_frac=pad_frac)
 

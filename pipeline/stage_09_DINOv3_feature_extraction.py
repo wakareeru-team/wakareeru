@@ -139,14 +139,11 @@ def load_crop_manifest(
 
 def _source_image_path(
     row: pd.Series | dict,
-    img_root: Path | None = None,
     config: dict | None = None,
 ) -> Path:
     path = Path(str(row["downloaded_path"]).replace("\\", "/"))
     if path.is_absolute():
         return path
-    if img_root is not None:
-        return img_root / path
     return utils.join_data_root(path, config=config)
 
 
@@ -173,12 +170,11 @@ def crop_from_image(
 
 def load_crop(
     row: pd.Series | dict,
-    img_root: Path | None = None,
     config: dict | None = None,
     pad_frac: float = 0.04,
 ) -> Image.Image:
     img = utils.load_img_with_orientation(
-        _source_image_path(row, img_root=img_root, config=config)
+        _source_image_path(row, config=config)
     )
     return crop_from_image(img, row, pad_frac=pad_frac)
 
@@ -188,10 +184,10 @@ class CropImageDataset(torch.utils.data.Dataset):
     def __init__(
             self,
             df_crops: pd.DataFrame,
-            img_root,
+            config: dict | None = None,
             pad_frac: float = 0.04):
         self.df_crops = df_crops.reset_index(drop=True)
-        self.img_root = img_root
+        self.config = config
         self.pad_frac = pad_frac
     
     def __len__(self):
@@ -200,7 +196,7 @@ class CropImageDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, idx):
         row = self.df_crops.iloc[idx]
-        cropped_img = load_crop(row, img_root=self.img_root, pad_frac=self.pad_frac)
+        cropped_img = load_crop(row, config=self.config, pad_frac=self.pad_frac)
         return cropped_img, row.to_dict()
 
 
@@ -265,7 +261,7 @@ def main(config=None):
         raise ValueError("noise_detection.feature_cache_shard_size must be > 0")
     dataset = CropImageDataset(
         df_crops,
-        img_root=utils.get_data_root(config),
+        config=config,
         pad_frac=noise_detection_cfg["crop_pad_frac"],
     )
     dataloader = torch.utils.data.DataLoader(
