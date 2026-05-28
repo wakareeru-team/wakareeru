@@ -1,5 +1,6 @@
 from pathlib import Path
 import logging
+import pathlib
 import re
 import sqlite3
 import sys
@@ -7,6 +8,7 @@ import os
 import pandas as pd
 import numpy as np
 from PIL import Image, ImageOps
+import time
 
 # ================ Config Utils ================
 
@@ -65,6 +67,55 @@ def join_data_root(path: str | Path, config: dict | None = None) -> Path:
     if not path.is_absolute():
         path = get_data_root(config) / path
     return path
+
+
+# 为分轮次loss分析保存数据的helper
+def create_new_loss_round_dir(config: dict) -> Path:
+    loss_analysis_root = join_data_root(config['path']['loss_analysis_data_dir'], config=config)
+    if not loss_analysis_root.is_dir():
+        loss_analysis_root.mkdir(parents=True, exist_ok=True)
+    timestr = time.strftime('%Y%m%d_%H%M%S',time.localtime())
+    analysis_dir = loss_analysis_root / timestr
+    analysis_dir.mkdir(parents=True, exist_ok=False)
+    pointer = config['loss_noise_tracking']['latest_loss_analysis_round_pointer']
+    with open(loss_analysis_root / pointer, 'w') as f:
+                f.write(timestr)
+    return analysis_dir
+
+
+def get_current_loss_round_dir(config: dict) -> Path:
+    loss_analysis_root = join_data_root(config['path']['loss_analysis_data_dir'], config=config)
+    loss_config = config['loss_noise_tracking']
+    active_round = loss_config['active_loss_analysis_round']
+    pointer = loss_config['latest_loss_analysis_round_pointer']
+    return get_loss_round_dir(config=config, active_round=active_round, pointer=pointer)
+
+
+def get_loss_round_dir(config: dict, active_round: str, pointer: str | None = None) -> Path:
+    loss_analysis_root = join_data_root(config['path']['loss_analysis_data_dir'], config=config)
+    if pointer is None:
+        pointer = config['loss_noise_tracking']['latest_loss_analysis_round_pointer']
+    pointer_path = loss_analysis_root / pointer
+    if active_round == 'latest':
+        if pointer_path.exists():
+            with open(pointer_path, 'r') as f:
+                timestr = f.read().strip()
+            analysis_dir = loss_analysis_root / timestr
+            if analysis_dir.exists():
+                return analysis_dir
+            else: # 设计上去让他报错
+                raise FileNotFoundError(f"Expected loss analysis dir not found: {analysis_dir}")
+        else:
+            raise FileNotFoundError(f"Latest loss analysis round pointer not found: {pointer_path}")
+            
+    else:
+        
+        analysis_dir = loss_analysis_root / active_round
+        if analysis_dir.exists():
+            return analysis_dir
+        else: # 设计上去让他报错
+            raise FileNotFoundError(f"Expected loss analysis dir not found: {analysis_dir}")
+
 
 
 # ================ Image Processing Utils ================

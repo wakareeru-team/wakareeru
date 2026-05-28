@@ -16,6 +16,7 @@ path:
   model_dir: "model"
   dataset_dir: "dataset"
   dataset_img_subdir: "images"
+  'loss_analysis_data_dir': "loss_analysis"
 
 
 # Crawler configuration
@@ -121,18 +122,20 @@ loss_noise_tracking:
   lr_cycle_period: 10
   num_epochs: 30
   weight_decay: 1e-4
-  loss_history_path: "demo_loss_history.csv"
-  epoch_history_path: "demo_epoch_history.csv"
+  active_loss_analysis_round: 'latest' # latest则读取最新结果，结果放在下面的txt指针里
+  latest_loss_analysis_round_pointer: 'latest_loss_analysis_round.txt'
+  loss_history_file_name: "demo_loss_history.csv"
+  epoch_history_file_name: "demo_epoch_history.csv"
   model_checkpoint_prefix: "DINO_CLS_HEAD"
 
 loss_analysis:
-  loss_feature_dir: "demo_loss_feature.csv"
+  loss_feature_file_name: "demo_loss_feature.csv"
   request_manual_review: true # 是否请求人工标记一部分数据，若是则直接跳出pipeline，并提示通过tool下review工具完成标记
 
 logistic_regression_filter:
   minimum_reviewed_samples: 200
   # ============ LR相关配置 ============
-  # 用于训练Logistic Regression的特征列。需要与loss_feature_dir中提供的特征列匹配。
+  # 用于训练Logistic Regression的特征列。需要与loss_feature_file_name中提供的特征列匹配。
   feature_columns: ['mean', 'loss_tail_mean', 'loss_mean_pct_in_label',"error_rate", 'pred_label_rate']
   noise_positive_label: ['wrong_label']
   excluding_label: ['bad_crop', "out_of_label_space"]
@@ -150,11 +153,20 @@ logistic_regression_filter:
 lr_prediction: # 对未知数据应用LR模型
   lr_model_path: 'latest' # 可以是具体的模型文件路径，或者"latest"表示使用最新训练好的模型
   reprocess: false #跳过已经有LR预测结果的数据
+  prediction_file_name: "lr_predictions.csv"
+  sync_to_db: true
 
 crops_storage:
   format: 'flatten' #存储格式，可选'flatten'或'nested'。'flatten'表示将所有crop数据存储在同一层级的表中，'nested'表示按照series或submodel等层级结构存储。
   reprocess: false #为false则跳过已经存储crop的数据
   save_only_manual_reviewed: false # 仅保存人工审核过的crop数据到数据库，跳过未审核数据（包括自动审核和未审核数据）
+  exclude_manual_noise: true
+  manual_noise_labels: ["wrong_label", "out_of_label_space", "bad_crop"]
+  exclude_predicted_noise: true
+  noise_prediction_round: "latest"
+  noise_prediction_file_name: "lr_predictions.csv"
+  predicted_noise_labels: ["wrong_label"]
+  predicted_noise_min_prob: 0.8
   crop_pad_frac: 0.04
   image_extension: "jpeg"
   label_column: "fine_grained_series"
