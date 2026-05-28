@@ -66,13 +66,6 @@ def main(config: dict | None = None) -> None:
     clean_label = lr_config['clean_label']
 
     training_labels = set(noise_positive_label) | {clean_label}
-    corrected_mask = (
-        reviewed_data["manual_corrected_label"].notna()
-        & (reviewed_data["manual_corrected_label"].astype(str).str.strip() != "")
-    )
-    if corrected_mask.any():
-        reviewed_data.loc[corrected_mask, "noise_review_label"] = clean_label
-        logger.info("将%d条已人工纠正标签的样本作为clean样本训练LR。", int(corrected_mask.sum()))
     filtered = reviewed_data[reviewed_data['noise_review_label'].isin(training_labels)].copy()
     skipped_labels = sorted(set(reviewed_data['noise_review_label']) - training_labels - set(excluding_label))
     if skipped_labels:
