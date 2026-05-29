@@ -151,6 +151,12 @@ python pipeline_entry.py --from manifest_crawling
 python tools/noise_review_gradio.py
 ```
 
+启动指定 loss round 的只读抽查 UI（支持高可疑、高错误率、按 label 均衡抽样等）：
+
+```bash
+python tools/loss_round_spotcheck_gradio.py
+```
+
 导出/导入人工复核 CSV（路径相对 `path.data_root` 解析，使用 stable key + bbox IoU 匹配）：
 
 ```bash

@@ -28,6 +28,38 @@ import joblib
 from lr_model import LogisticRegressionWithThreshold
 
 logger = utils.get_logger("stage_12_logistic_regression_filter")
+
+
+def build_effective_review_labels(
+    reviewed_data: pd.DataFrame,
+    current_round_id: str,
+    clean_label: str,
+) -> pd.Series:
+    effective = reviewed_data["noise_review_label"].copy()
+    review_score_col = reviewed_data.get("noise_review_score_col")
+    if review_score_col is None:
+        review_score_col = pd.Series("", index=reviewed_data.index)
+
+    corrected = (
+        reviewed_data["manual_corrected_label"].notna()
+        & (reviewed_data["manual_corrected_label"].astype(str).str.strip() != "")
+    )
+    current_round_prefix = f"loss_round:{current_round_id}:"
+    reviewed_in_current_round = review_score_col.fillna("").astype(str).str.startswith(
+        current_round_prefix
+    )
+    old_corrected_wrong_label = (
+        effective.eq(constants.NOISE_REVIEW_LABEL_WRONG_LABEL)
+        & corrected
+        & ~reviewed_in_current_round
+    )
+    if old_corrected_wrong_label.any():
+        logger.info(
+            "将%d条旧轮次已纠正wrong_label作为clean处理。",
+            int(old_corrected_wrong_label.sum()),
+        )
+    effective.loc[old_corrected_wrong_label] = clean_label
+    return effective
     
 def main(config: dict | None = None) -> None:
     if config is None:
@@ -37,14 +69,19 @@ def main(config: dict | None = None) -> None:
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
     logger.info("对人工标记数据进行logistic regression")
     
-    
-    features = pd.read_csv(utils.get_current_loss_round_dir(config)
-                        / config['loss_analysis']['loss_feature_file_name'])
+    loss_round_dir = utils.get_current_loss_round_dir(config)
+    current_round_id = loss_round_dir.name
+    features = pd.read_csv(loss_round_dir / config['loss_analysis']['loss_feature_file_name'])
 
 
     with sqlite3.connect(db_path) as conn:
         SQLquery = '''
-        SELECT id AS crop_id, noise_review_label, manual_corrected_label FROM crops
+        SELECT
+            id AS crop_id,
+            noise_review_label,
+            noise_review_score_col,
+            manual_corrected_label
+        FROM crops
         WHERE  noise_review_label IS NOT NULL
         
         '''
@@ -64,15 +101,26 @@ def main(config: dict | None = None) -> None:
     noise_positive_label = lr_config['noise_positive_label']
     excluding_label = lr_config['excluding_label']
     clean_label = lr_config['clean_label']
+    reviewed_data["effective_noise_review_label"] = build_effective_review_labels(
+        reviewed_data,
+        current_round_id=current_round_id,
+        clean_label=clean_label,
+    )
 
     training_labels = set(noise_positive_label) | {clean_label}
-    filtered = reviewed_data[reviewed_data['noise_review_label'].isin(training_labels)].copy()
-    skipped_labels = sorted(set(reviewed_data['noise_review_label']) - training_labels - set(excluding_label))
+    filtered = reviewed_data[
+        reviewed_data['effective_noise_review_label'].isin(training_labels)
+    ].copy()
+    skipped_labels = sorted(
+        set(reviewed_data['effective_noise_review_label'])
+        - training_labels
+        - set(excluding_label)
+    )
     if skipped_labels:
         logger.warning("以下人工标签未纳入logistic regression训练: %s", skipped_labels)
 
     X = filtered[feature_columns].astype(float).copy()
-    y = filtered['noise_review_label'].isin(noise_positive_label).to_numpy(dtype=np.int64)
+    y = filtered['effective_noise_review_label'].isin(noise_positive_label).to_numpy(dtype=np.int64)
     class_counts = np.bincount(y, minlength=2)
     if class_counts.min() < 2:
         logger.warning("正负样本数量不足，无法进行分层训练: clean=%d, noise=%d", class_counts[0], class_counts[1])
