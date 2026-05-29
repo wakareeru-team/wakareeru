@@ -587,8 +587,17 @@ def build_review_app():
 
         def score_col_for_review(score_source_value, loss_round_value, score_col_value):
             if score_source_value == "loss_round":
-                return f"loss_round:{str(loss_round_value).strip() or 'latest'}:{score_col_value}"
+                round_name = utils.get_loss_round_dir(
+                    config=CONFIG,
+                    active_round=str(loss_round_value).strip() or "latest",
+                ).name
+                return f"loss_round:{round_name}:{score_col_value}"
             return str(score_col_value)
+
+        def stay_on_current_record(records, idx):
+            idx = max(0, int(idx))
+            img, md, current_label, current_note, current_corrected_label, prog = display_record(records, idx)
+            return records, idx, img, md, current_label, current_note, current_corrected_label, prog
 
         def on_save_next(records, idx, label, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value):
             records = records or []
@@ -598,6 +607,13 @@ def build_review_app():
             if idx >= len(records):
                 raise gr.Error("这一批样本已经全部 review 完成。")
             idx = max(0, idx)
+            if not label:
+                gr.Warning("请选择一个 review label 再保存。")
+                return stay_on_current_record(records, idx)
+            corrected_label_value = str(corrected_label_value or "").strip() or None
+            if label == constants.NOISE_REVIEW_LABEL_WRONG_LABEL and not corrected_label_value:
+                gr.Warning("标记为 wrong_label 时，请先选择正确标签。")
+                return stay_on_current_record(records, idx)
             row = records[idx]
             save_review(
                 row["crop_id"],
