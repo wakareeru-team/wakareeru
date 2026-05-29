@@ -227,6 +227,8 @@ ruff check .
 pytest
 ```
 
+处理内存占用较小的 metadata、manifest、review overlay 等表格数据时，优先全量读取后用 pandas/DataFrame 表达筛选和派生逻辑；复杂 SQL 拼接只在数据量或数据库侧约束确实需要时使用。
+
 ## 当前状态
 
 项目仍处于数据集构建与清洗阶段。当前主线管线已经覆盖标签解析、Commons manifest、图片下载、SigLIP2 图片过滤、LLM 元数据标注与 Grounding-DINO 主体裁切。`src/crawler/` 下的 notebook 主要用于实验和验证，不是稳定入口。
