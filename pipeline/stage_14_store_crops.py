@@ -335,38 +335,46 @@ def main(config: dict | None = None) -> None:
         metadata["source_path"] = metadata["downloaded_path"].map(
             lambda path: utils.join_data_root(str(path), config=config)
         )
-        
-        saved_rows = []
+
+        if crops_storage_config["reprocess"]:
+            reusable_mask = pd.Series(False, index=metadata.index)
+        else:
+            reusable_mask = (
+                metadata["crop_path"].notna()
+                & (metadata["crop_path"].astype(str).str.strip() == metadata["image_path"].astype(str))
+                & metadata["output_path"].map(lambda path: Path(path).exists())
+            )
+        reusable_count = int(reusable_mask.sum())
+        to_save = metadata.loc[~reusable_mask].copy()
+        reusable_rows = metadata.loc[reusable_mask].copy()
+        logger.info(
+            "crop图像复用%d条，需要裁剪保存%d条。",
+            reusable_count,
+            len(to_save),
+        )
+
+        saved_rows = reusable_rows.to_dict(orient="records")
         db_updates = []
         db_update_batch_size = 100
-        for _, row in tqdm(metadata.iterrows(), total=len(metadata), desc="存盘裁剪图像"):
+        for _, row in tqdm(to_save.iterrows(), total=len(to_save), desc="存盘裁剪图像"):
             try:
-                existing_crop_path = row.get("crop_path")
-                reusable_crop = (
-                    not crops_storage_config["reprocess"] #不要求重处理
-                    and pd.notna(existing_crop_path) #且存在
-                    and str(existing_crop_path).strip() == str(row["image_path"]) #并且路径一致（改过格式就会不一致，进而重保存）
-                    and Path(row["output_path"]).exists() #且文件存在
+                save_crop_image(
+                    source_image_path=row["source_path"],
+                    output_path=row["output_path"],
+                    box_x1=row["box_x1"],
+                    box_y1=row["box_y1"],
+                    box_x2=row["box_x2"],
+                    box_y2=row["box_y2"],
+                    pad_frac=crops_storage_config["crop_pad_frac"],
+                    image_format=image_extension,
+                    jpeg_quality=crops_storage_config['jpeg_quality']
                 )
-                if not reusable_crop:
-                    save_crop_image(
-                        source_image_path=row["source_path"],
-                        output_path=row["output_path"],
-                        box_x1=row["box_x1"],
-                        box_y1=row["box_y1"],
-                        box_x2=row["box_x2"],
-                        box_y2=row["box_y2"],
-                        pad_frac=crops_storage_config["crop_pad_frac"],
-                        image_format=image_extension,
-                        jpeg_quality=crops_storage_config['jpeg_quality']
-                    )
                 saved_row = row.to_dict()
                 saved_rows.append(saved_row)
-                if not reusable_crop:
-                    db_updates.append((row["image_path"], int(row["crop_id"])))
-                    if len(db_updates) >= db_update_batch_size:
-                        flush_crop_save_updates(db_path, db_updates)
-                        db_updates.clear()
+                db_updates.append((row["image_path"], int(row["crop_id"])))
+                if len(db_updates) >= db_update_batch_size:
+                    flush_crop_save_updates(db_path, db_updates)
+                    db_updates.clear()
             except Exception as e:
                 logger.error(f"保存crop_id={row['crop_id']}失败: {e}")
                 continue
