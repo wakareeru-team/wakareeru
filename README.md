@@ -63,7 +63,6 @@ data/
   feature_cache/
   review/
 tools/                     # 人工 review 等交互式辅助工具
-training/                  # 直接读取最终 dataset 的训练入口
 src/crawler/               # 探索性 notebook 与实验流程
 docs/                      # 项目过程记录
 ```
@@ -164,14 +163,6 @@ python tools/loss_round_spotcheck_gradio.py
 python tools/export_noise_review_csv.py --output-csv-path review/noise_review_labels.csv
 python tools/import_noise_review_csv.py --review-csv-path review/noise_review_labels.csv
 ```
-
-训练已导出的最终数据集，先跑 DINOv3 特征缓存上的线性探针基线：
-
-```bash
-python training/train_linear_probe.py
-```
-
-该入口直接读取 `data/dataset/metadata.csv` 与 `data/dataset/images/`，按 `crop_id` 对齐 `data/feature_cache/latest_feature_cache.txt` 指向的 DINOv3 特征缓存；训练产物写入 `data/training_runs/<run_name>/`。
 
 可用阶段包括：
 
