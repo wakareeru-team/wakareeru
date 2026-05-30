@@ -211,7 +211,7 @@ trainer:
   phases:
     - name: "linear_head_warmup"
       train_mode: "linear_head"
-      epochs: 3
+      epochs: 15
       learning_rate: 1e-3
       weight_decay: 1e-4
       lora_r: 8
