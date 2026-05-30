@@ -87,13 +87,15 @@ class BackboneLinearClassifier(nn.Module):
         return self
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        features = self.extract_features(pixel_values)
+        return self.classifier(features)
+
+    def extract_features(self, pixel_values: torch.Tensor) -> torch.Tensor:
         if self.backbone_frozen:
             with torch.no_grad():
                 outputs = self.backbone(pixel_values=pixel_values)
         else:
             outputs = self.backbone(pixel_values=pixel_values)
         if getattr(outputs, "pooler_output", None) is not None:
-            features = outputs.pooler_output
-        else:
-            features = outputs.last_hidden_state[:, 0]
-        return self.classifier(features)
+            return outputs.pooler_output
+        return outputs.last_hidden_state[:, 0]

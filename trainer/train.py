@@ -6,14 +6,14 @@ import pandas as pd
 import torch
 from sklearn.model_selection import train_test_split
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm.auto import tqdm
 from transformers import AutoImageProcessor
 
 from pipeline import utils
 from trainer.checkpoint import save_checkpoint, write_json
 from trainer.dataset import CropCollator, CropDataset
-from trainer.eval import evaluate
+from trainer.eval import build_eval_report, evaluate
 from trainer.model import BackboneLinearClassifier
 
 logger = utils.get_logger("trainer")
@@ -131,6 +131,149 @@ def make_dataloader(
     return DataLoader(dataset, **dataloader_kwargs)
 
 
+def make_feature_cache_path(
+    *,
+    config: dict[str, Any],
+    trainer_cfg: dict[str, Any],
+    feature_cache_file_name: str,
+) -> Path:
+    feature_cache_dir = utils.join_data_root(trainer_cfg["feature_cache_dir"], config=config)
+    return feature_cache_dir / feature_cache_file_name
+
+
+@torch.inference_mode()
+def extract_feature_table(
+    *,
+    model: BackboneLinearClassifier,
+    dataloader: DataLoader,
+    device: torch.device,
+    amp_enabled: bool,
+    amp_dtype: torch.dtype,
+) -> dict[str, Any]:
+    model.eval()
+    features = []
+    labels = []
+    sample_indices = []
+    image_paths = []
+    for batch in tqdm(dataloader, desc="extract features", unit="batch"):
+        pixel_values = batch["pixel_values"].to(device, non_blocking=True)
+        with torch.autocast(
+            device_type=device.type,
+            dtype=amp_dtype,
+            enabled=amp_enabled,
+        ):
+            batch_features = model.extract_features(pixel_values)
+        features.append(batch_features.float().cpu())
+        labels.append(batch["labels"].cpu())
+        sample_indices.append(batch["sample_index"].cpu())
+        image_paths.extend(batch["image_path"])
+    return {
+        "features": torch.cat(features, dim=0),
+        "labels": torch.cat(labels, dim=0),
+        "sample_indices": torch.cat(sample_indices, dim=0),
+        "image_paths": image_paths,
+    }
+
+
+def load_or_create_feature_cache(
+    *,
+    config: dict[str, Any],
+    trainer_cfg: dict[str, Any],
+    phase_cfg: dict[str, Any],
+    model: BackboneLinearClassifier,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    dataset_root: Path,
+    processor: Any,
+    device: torch.device,
+    amp_enabled: bool,
+    amp_dtype: torch.dtype,
+) -> dict[str, Any]:
+    feature_cache_path = make_feature_cache_path(
+        config=config,
+        trainer_cfg=trainer_cfg,
+        feature_cache_file_name=phase_cfg["feature_cache_file_name"],
+    )
+    if feature_cache_path.exists() and not bool(phase_cfg["feature_cache_rebuild"]):
+        logger.info("加载linear head特征缓存: %s", feature_cache_path)
+        cache = torch.load(feature_cache_path, map_location="cpu", weights_only=False)
+        if cache["backbone_model_name"] != trainer_cfg["backbone_model_name"]:
+            raise ValueError(
+                "linear head特征缓存的backbone_model_name与当前配置不一致，"
+                "请设置feature_cache_rebuild=true后重建。"
+            )
+        if len(cache["train"]["labels"]) != len(train_df) or len(cache["val"]["labels"]) != len(val_df):
+            raise ValueError(
+                "linear head特征缓存样本数与当前train/val切分不一致，"
+                "请设置feature_cache_rebuild=true后重建。"
+            )
+        return cache
+
+    logger.info("开始生成linear head特征缓存: %s", feature_cache_path)
+    feature_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    train_feature_loader = make_dataloader(
+        metadata=train_df,
+        dataset_root=dataset_root,
+        processor=processor,
+        trainer_cfg=trainer_cfg,
+        train=False,
+    )
+    val_feature_loader = make_dataloader(
+        metadata=val_df,
+        dataset_root=dataset_root,
+        processor=processor,
+        trainer_cfg=trainer_cfg,
+        train=False,
+    )
+    model.train_linear_head_only()
+    model.to(device)
+    cache = {
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+        "backbone_model_name": trainer_cfg["backbone_model_name"],
+        "train_sample_count": int(len(train_df)),
+        "val_sample_count": int(len(val_df)),
+        "train": extract_feature_table(
+            model=model,
+            dataloader=train_feature_loader,
+            device=device,
+            amp_enabled=amp_enabled,
+            amp_dtype=amp_dtype,
+        ),
+        "val": extract_feature_table(
+            model=model,
+            dataloader=val_feature_loader,
+            device=device,
+            amp_enabled=amp_enabled,
+            amp_dtype=amp_dtype,
+        ),
+    }
+    torch.save(cache, feature_cache_path)
+    logger.info("linear head特征缓存已保存: %s", feature_cache_path)
+    return cache
+
+
+def make_feature_dataloader(
+    *,
+    feature_table: dict[str, Any],
+    batch_size: int,
+    shuffle: bool,
+    drop_last: bool,
+    pin_memory: bool,
+) -> DataLoader:
+    dataset = TensorDataset(
+        feature_table["features"],
+        feature_table["labels"].long(),
+        feature_table["sample_indices"].long(),
+    )
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        pin_memory=pin_memory,
+    )
+
+
 def train_one_epoch(
     *,
     model: nn.Module,
@@ -174,6 +317,89 @@ def train_one_epoch(
         "accuracy": correct_count / max(1, sample_count),
         "n": sample_count,
     }
+
+
+def train_feature_head_one_epoch(
+    *,
+    model: BackboneLinearClassifier,
+    dataloader: DataLoader,
+    criterion: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    amp_enabled: bool,
+    amp_dtype: torch.dtype,
+) -> dict[str, float | int]:
+    model.classifier.train()
+    loss_chunks = []
+    correct_chunks = []
+    sample_count = 0
+    for features_cpu, labels_cpu, _sample_indices_cpu in tqdm(dataloader, desc="train features", unit="batch"):
+        features = features_cpu.to(device, non_blocking=True)
+        labels = labels_cpu.to(device, non_blocking=True)
+        optimizer.zero_grad(set_to_none=True)
+        with torch.autocast(
+            device_type=device.type,
+            dtype=amp_dtype,
+            enabled=amp_enabled,
+        ):
+            logits = model.classifier(features)
+            loss = criterion(logits, labels)
+        loss.backward()
+        optimizer.step()
+        with torch.no_grad():
+            preds = logits.argmax(dim=1)
+            batch_size = int(labels.numel())
+            loss_chunks.append(loss.detach() * batch_size)
+            correct_chunks.append(preds.eq(labels).sum().detach())
+            sample_count += batch_size
+
+    loss_sum = torch.stack(loss_chunks).sum().item() if loss_chunks else 0.0
+    correct_count = torch.stack(correct_chunks).sum().item() if correct_chunks else 0
+    return {
+        "loss": loss_sum / max(1, sample_count),
+        "accuracy": correct_count / max(1, sample_count),
+        "n": sample_count,
+    }
+
+
+@torch.inference_mode()
+def evaluate_feature_head(
+    *,
+    model: BackboneLinearClassifier,
+    dataloader: DataLoader,
+    feature_table: dict[str, Any],
+    labels: pd.DataFrame,
+    device: torch.device,
+    amp_enabled: bool,
+    amp_dtype: torch.dtype,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    model.classifier.eval()
+    records = []
+    image_paths = feature_table["image_paths"]
+    for features_cpu, labels_cpu, sample_indices_cpu in tqdm(dataloader, desc="eval features", unit="batch"):
+        features = features_cpu.to(device, non_blocking=True)
+        y_true = labels_cpu.to(device, non_blocking=True)
+        with torch.autocast(
+            device_type=device.type,
+            dtype=amp_dtype,
+            enabled=amp_enabled,
+        ):
+            logits = model.classifier(features)
+        probs = torch.softmax(logits, dim=1)
+        confidence, y_pred = probs.max(dim=1)
+        for i, sample_index in enumerate(sample_indices_cpu.tolist()):
+            records.append(
+                {
+                    "sample_index": int(sample_index),
+                    "image_path": image_paths[int(sample_index)],
+                    "label_id": int(y_true[i].item()),
+                    "pred_id": int(y_pred[i].item()),
+                    "pred_confidence": float(confidence[i].item()),
+                    "correct": bool(y_pred[i].eq(y_true[i]).item()),
+                }
+            )
+    predictions = pd.DataFrame(records)
+    return build_eval_report(predictions=predictions, labels=labels), predictions
 
 
 def is_metric_improved(
@@ -260,10 +486,15 @@ def run_phase(
     model: BackboneLinearClassifier,
     train_loader: DataLoader,
     val_loader: DataLoader,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    dataset_root: Path,
+    processor: Any,
     labels: pd.DataFrame,
     criterion: nn.Module,
     device: torch.device,
     trainer_cfg: dict[str, Any],
+    config: dict[str, Any],
     run_dir: Path,
     labels_payload: list[dict[str, Any]],
     epoch_rows: list[dict[str, Any]],
@@ -279,6 +510,7 @@ def run_phase(
     phase_name = str(phase_cfg["name"])
     amp_enabled = bool(trainer_cfg["amp_enabled"]) and device.type == "cuda"
     amp_dtype = get_amp_dtype(str(trainer_cfg["amp_dtype"]))
+    use_feature_cache = bool(phase_cfg["use_feature_cache"])
     early_stopping_enabled = bool(phase_cfg["early_stopping_enabled"])
     early_stopping_monitor = str(phase_cfg["early_stopping_monitor"])
     early_stopping_mode = str(phase_cfg["early_stopping_mode"])
@@ -293,25 +525,78 @@ def run_phase(
     epochs_without_improvement = 0
     stopped_early = False
     completed_epochs = 0
-
-    logger.info("开始phase=%s, mode=%s, epochs=%d", phase_name, phase_cfg["train_mode"], int(phase_cfg["epochs"]))
-    for phase_epoch in range(int(phase_cfg["epochs"])):
-        global_epoch = global_epoch_start + phase_epoch
-        train_metrics = train_one_epoch(
+    feature_cache = None
+    feature_train_loader = None
+    feature_val_loader = None
+    if use_feature_cache:
+        if phase_cfg["train_mode"] != "linear_head":
+            raise ValueError("feature cache目前只支持linear_head phase")
+        feature_cache = load_or_create_feature_cache(
+            config=config,
+            trainer_cfg=trainer_cfg,
+            phase_cfg=phase_cfg,
             model=model,
-            dataloader=train_loader,
-            criterion=criterion,
-            optimizer=optimizer,
+            train_df=train_df,
+            val_df=val_df,
+            dataset_root=dataset_root,
+            processor=processor,
             device=device,
             amp_enabled=amp_enabled,
             amp_dtype=amp_dtype,
         )
-        eval_report, predictions = evaluate(
-            model=model,
-            dataloader=val_loader,
-            labels=labels,
-            device=device,
+        feature_train_loader = make_feature_dataloader(
+            feature_table=feature_cache["train"],
+            batch_size=int(trainer_cfg["batch_size"]),
+            shuffle=True,
+            drop_last=bool(trainer_cfg["drop_last"]),
+            pin_memory=bool(trainer_cfg["pin_memory"]),
         )
+        feature_val_loader = make_feature_dataloader(
+            feature_table=feature_cache["val"],
+            batch_size=int(trainer_cfg["batch_size"]),
+            shuffle=False,
+            drop_last=False,
+            pin_memory=bool(trainer_cfg["pin_memory"]),
+        )
+
+    logger.info("开始phase=%s, mode=%s, epochs=%d", phase_name, phase_cfg["train_mode"], int(phase_cfg["epochs"]))
+    for phase_epoch in range(int(phase_cfg["epochs"])):
+        global_epoch = global_epoch_start + phase_epoch
+        if use_feature_cache:
+            train_metrics = train_feature_head_one_epoch(
+                model=model,
+                dataloader=feature_train_loader,
+                criterion=criterion,
+                optimizer=optimizer,
+                device=device,
+                amp_enabled=amp_enabled,
+                amp_dtype=amp_dtype,
+            )
+            eval_report, predictions = evaluate_feature_head(
+                model=model,
+                dataloader=feature_val_loader,
+                feature_table=feature_cache["val"],
+                labels=labels,
+                device=device,
+                amp_enabled=amp_enabled,
+                amp_dtype=amp_dtype,
+            )
+        else:
+            train_metrics = train_one_epoch(
+                model=model,
+                dataloader=train_loader,
+                criterion=criterion,
+                optimizer=optimizer,
+                device=device,
+                amp_enabled=amp_enabled,
+                amp_dtype=amp_dtype,
+            )
+            eval_report, predictions = evaluate(
+                model=model,
+                dataloader=val_loader,
+                labels=labels,
+                device=device,
+            )
         epoch_row = {
             "phase": phase_name,
             "phase_epoch": phase_epoch,
@@ -401,6 +686,7 @@ def run_phase(
         "early_stopping_mode": early_stopping_mode,
         "stopped_early": stopped_early,
         "completed_epochs": completed_epochs,
+        "use_feature_cache": use_feature_cache,
     }
 
 
@@ -461,10 +747,15 @@ def main(config: dict[str, Any] | None = None) -> None:
             model=model,
             train_loader=train_loader,
             val_loader=val_loader,
+            train_df=train_df,
+            val_df=val_df,
+            dataset_root=dataset_root,
+            processor=processor,
             labels=labels,
             criterion=criterion,
             device=device,
             trainer_cfg=trainer_cfg,
+            config=config,
             run_dir=run_dir,
             labels_payload=labels_payload,
             epoch_rows=epoch_rows,

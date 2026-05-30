@@ -37,6 +37,14 @@ def evaluate(
             )
 
     predictions = pd.DataFrame(records)
+    return build_eval_report(predictions=predictions, labels=labels), predictions
+
+
+def build_eval_report(
+    *,
+    predictions: pd.DataFrame,
+    labels: pd.DataFrame,
+) -> dict[str, Any]:
     label_ids = labels["label_id"].astype(int).tolist()
     id_to_label = {
         int(row["label_id"]): str(row["label"])
@@ -78,4 +86,4 @@ def evaluate(
             "matrix": confusion_matrix(y_true_np, y_pred_np, labels=label_ids).astype(int).tolist(),
         },
     }
-    return report, predictions
+    return report
