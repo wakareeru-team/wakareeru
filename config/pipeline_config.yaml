@@ -192,23 +192,47 @@ trainer:
   output_dir: "trainer_runs"
   image_path_column: "image_path"
   label_id_column: "label_id"
-  learning_rate: 1e-3
-  weight_decay: 1e-4
   batch_size: 32
   num_workers: 4
   pin_memory: true
-  epochs: 30
   val_ratio: 0.2
   stratify_split: true
   seed: 42
   device: "auto"
-  early_stopping_enabled: true
-  early_stopping_monitor: "val_macro_f1"
-  early_stopping_mode: "max" # larger is better
-  early_stopping_patience: 3
-  early_stopping_min_delta: 0.0
   checkpoint_prefix: "linear_head"
   epoch_report_file_name: "epoch_report.csv"
   eval_report_file_name: "eval_report.json"
   prediction_file_name: "val_predictions.csv"
+  phases:
+    - name: "linear_head_warmup"
+      train_mode: "linear_head"
+      epochs: 3
+      learning_rate: 1e-3
+      weight_decay: 1e-4
+      lora_r: 8
+      lora_alpha: 16
+      lora_dropout: 0.05
+      lora_bias: "none"
+      head_learning_rate: 1e-3
+      lora_learning_rate: 1e-4
+      early_stopping_enabled: false
+      early_stopping_monitor: "val_macro_f1"
+      early_stopping_mode: "max" # larger is better
+      early_stopping_patience: 3
+      early_stopping_min_delta: 0.0
+    - name: "lora_attention"
+      train_mode: "lora"
+      epochs: 30
+      weight_decay: 1e-4
+      lora_r: 8
+      lora_alpha: 16
+      lora_dropout: 0.05
+      lora_bias: "none"
+      head_learning_rate: 1e-3
+      lora_learning_rate: 1e-4
+      early_stopping_enabled: true
+      early_stopping_monitor: "val_macro_f1"
+      early_stopping_mode: "max" # larger is better
+      early_stopping_patience: 3
+      early_stopping_min_delta: 0.0
   

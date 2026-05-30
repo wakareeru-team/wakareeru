@@ -177,6 +177,206 @@ def is_metric_improved(
     raise ValueError("trainer.early_stopping_mode必须是'max'或'min'")
 
 
+def prepare_phase(model: BackboneLinearClassifier, phase_cfg: dict[str, Any]) -> None:
+    train_mode = phase_cfg["train_mode"]
+    if train_mode == "linear_head":
+        model.train_linear_head_only()
+        return
+    if train_mode == "lora":
+        model.enable_lora(
+            r=int(phase_cfg["lora_r"]),
+            alpha=int(phase_cfg["lora_alpha"]),
+            dropout=float(phase_cfg["lora_dropout"]),
+            bias=str(phase_cfg["lora_bias"]),
+        )
+        model.train_lora_and_head()
+        return
+    raise ValueError("trainer.phases[].train_mode必须是linear_head或lora")
+
+
+def make_phase_optimizer(
+    *,
+    model: BackboneLinearClassifier,
+    phase_cfg: dict[str, Any],
+) -> torch.optim.Optimizer:
+    train_mode = phase_cfg["train_mode"]
+    weight_decay = float(phase_cfg["weight_decay"])
+    if train_mode == "linear_head":
+        return torch.optim.AdamW(
+            model.classifier.parameters(),
+            lr=float(phase_cfg["learning_rate"]),
+            weight_decay=weight_decay,
+        )
+    if train_mode == "lora":
+        lora_parameters = [
+            parameter
+            for name, parameter in model.backbone.named_parameters()
+            if parameter.requires_grad and "lora_" in name
+        ]
+        if not lora_parameters:
+            raise ValueError("LoRA phase没有可训练的LoRA参数")
+        return torch.optim.AdamW(
+            [
+                {
+                    "params": model.classifier.parameters(),
+                    "lr": float(phase_cfg["head_learning_rate"]),
+                },
+                {
+                    "params": lora_parameters,
+                    "lr": float(phase_cfg["lora_learning_rate"]),
+                },
+            ],
+            weight_decay=weight_decay,
+        )
+    raise ValueError(f"未知训练模式: {train_mode!r}")
+
+
+def run_phase(
+    *,
+    phase_cfg: dict[str, Any],
+    model: BackboneLinearClassifier,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    labels: pd.DataFrame,
+    criterion: nn.Module,
+    device: torch.device,
+    trainer_cfg: dict[str, Any],
+    run_dir: Path,
+    labels_payload: list[dict[str, Any]],
+    epoch_rows: list[dict[str, Any]],
+    global_epoch_start: int,
+) -> tuple[int, dict[str, Any]]:
+    prepare_phase(model, phase_cfg)
+    model.to(device)
+    optimizer = make_phase_optimizer(
+        model=model,
+        phase_cfg=phase_cfg,
+    )
+
+    phase_name = str(phase_cfg["name"])
+    early_stopping_enabled = bool(phase_cfg["early_stopping_enabled"])
+    early_stopping_monitor = str(phase_cfg["early_stopping_monitor"])
+    early_stopping_mode = str(phase_cfg["early_stopping_mode"])
+    early_stopping_patience = int(phase_cfg["early_stopping_patience"])
+    early_stopping_min_delta = float(phase_cfg["early_stopping_min_delta"])
+    if early_stopping_patience < 1:
+        raise ValueError("trainer.phases[].early_stopping_patience必须大于等于1")
+
+    best_score = None
+    best_checkpoint_path = None
+    best_epoch = None
+    epochs_without_improvement = 0
+    stopped_early = False
+    completed_epochs = 0
+
+    logger.info("开始phase=%s, mode=%s, epochs=%d", phase_name, phase_cfg["train_mode"], int(phase_cfg["epochs"]))
+    for phase_epoch in range(int(phase_cfg["epochs"])):
+        global_epoch = global_epoch_start + phase_epoch
+        train_metrics = train_one_epoch(
+            model=model,
+            dataloader=train_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            device=device,
+        )
+        eval_report, predictions = evaluate(
+            model=model,
+            dataloader=val_loader,
+            labels=labels,
+            device=device,
+        )
+        epoch_row = {
+            "phase": phase_name,
+            "phase_epoch": phase_epoch,
+            "epoch": global_epoch,
+            "train_loss": train_metrics["loss"],
+            "train_accuracy": train_metrics["accuracy"],
+            "val_accuracy": eval_report["accuracy"],
+            "val_macro_f1": eval_report["macro_f1"],
+            "val_weighted_f1": eval_report["weighted_f1"],
+            "train_n": train_metrics["n"],
+            "val_n": eval_report["num_samples"],
+        }
+        if early_stopping_monitor not in epoch_row:
+            raise ValueError(f"early stopping监控指标不存在: {early_stopping_monitor!r}")
+        epoch_rows.append(epoch_row)
+        pd.DataFrame(epoch_rows).to_csv(run_dir / trainer_cfg["epoch_report_file_name"], index=False)
+        predictions.to_csv(run_dir / trainer_cfg["prediction_file_name"], index=False)
+        write_json(run_dir / trainer_cfg["eval_report_file_name"], eval_report)
+
+        checkpoint_path = run_dir / (
+            f"{trainer_cfg['checkpoint_prefix']}_{phase_name}_epoch{phase_epoch:03d}.pt"
+        )
+        save_checkpoint(
+            path=checkpoint_path,
+            model=model,
+            optimizer=optimizer,
+            epoch=global_epoch,
+            config=trainer_cfg,
+            metrics=epoch_row,
+            labels=labels_payload,
+        )
+        monitor_value = float(epoch_row[early_stopping_monitor])
+        if is_metric_improved(
+            current_value=monitor_value,
+            best_value=best_score,
+            mode=early_stopping_mode,
+            min_delta=early_stopping_min_delta,
+        ):
+            best_score = monitor_value
+            best_epoch = global_epoch
+            epochs_without_improvement = 0
+            best_checkpoint_path = run_dir / f"{trainer_cfg['checkpoint_prefix']}_{phase_name}_best.pt"
+            save_checkpoint(
+                path=best_checkpoint_path,
+                model=model,
+                optimizer=optimizer,
+                epoch=global_epoch,
+                config=trainer_cfg,
+                metrics=epoch_row,
+                labels=labels_payload,
+            )
+        else:
+            epochs_without_improvement += 1
+        completed_epochs += 1
+        logger.info(
+            "phase=%s epoch=%d train_loss=%.4f train_acc=%.4f val_acc=%.4f val_macro_f1=%.4f best_%s=%.4f stale_epochs=%d",
+            phase_name,
+            phase_epoch,
+            float(train_metrics["loss"]),
+            float(train_metrics["accuracy"]),
+            float(eval_report["accuracy"]),
+            float(eval_report["macro_f1"]),
+            early_stopping_monitor,
+            float(best_score) if best_score is not None else float("nan"),
+            epochs_without_improvement,
+        )
+        if early_stopping_enabled and epochs_without_improvement >= early_stopping_patience:
+            stopped_early = True
+            logger.info(
+                "phase=%s early stopping触发: monitor=%s, mode=%s, patience=%d, best_epoch=%s, best_score=%.4f",
+                phase_name,
+                early_stopping_monitor,
+                early_stopping_mode,
+                early_stopping_patience,
+                best_epoch,
+                float(best_score) if best_score is not None else float("nan"),
+            )
+            break
+
+    return completed_epochs, {
+        "phase": phase_name,
+        "train_mode": phase_cfg["train_mode"],
+        "best_score": best_score,
+        "best_epoch": best_epoch,
+        "best_checkpoint_path": str(best_checkpoint_path) if best_checkpoint_path else None,
+        "early_stopping_monitor": early_stopping_monitor,
+        "early_stopping_mode": early_stopping_mode,
+        "stopped_early": stopped_early,
+        "completed_epochs": completed_epochs,
+    }
+
+
 def main(config: dict[str, Any] | None = None) -> None:
     if config is None:
         config = utils.load_pipeline_config()
@@ -210,12 +410,6 @@ def main(config: dict[str, Any] | None = None) -> None:
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(
-        [parameter for parameter in model.parameters() if parameter.requires_grad],
-        lr=float(trainer_cfg["learning_rate"]),
-        weight_decay=float(trainer_cfg["weight_decay"]),
-    )
-
     run_dir = utils.join_data_root(trainer_cfg["output_dir"], config=config) / time.strftime(
         "%Y%m%d_%H%M%S",
         time.localtime(),
@@ -232,115 +426,32 @@ def main(config: dict[str, Any] | None = None) -> None:
 
     labels_payload = labels.to_dict(orient="records")
     epoch_rows = []
-    early_stopping_enabled = bool(trainer_cfg["early_stopping_enabled"])
-    early_stopping_monitor = str(trainer_cfg["early_stopping_monitor"])
-    early_stopping_mode = str(trainer_cfg["early_stopping_mode"])
-    early_stopping_patience = int(trainer_cfg["early_stopping_patience"])
-    early_stopping_min_delta = float(trainer_cfg["early_stopping_min_delta"])
-    if early_stopping_patience < 1:
-        raise ValueError("trainer.early_stopping_patience必须大于等于1")
-
-    best_score = None
-    best_checkpoint_path = None
-    best_epoch = None
-    epochs_without_improvement = 0
-    stopped_early = False
-    for epoch in range(int(trainer_cfg["epochs"])):
-        train_metrics = train_one_epoch(
+    phase_summaries = []
+    global_epoch = 0
+    for phase_cfg in trainer_cfg["phases"]:
+        completed_epochs, phase_summary = run_phase(
+            phase_cfg=phase_cfg,
             model=model,
-            dataloader=train_loader,
-            criterion=criterion,
-            optimizer=optimizer,
-            device=device,
-        )
-        eval_report, predictions = evaluate(
-            model=model,
-            dataloader=val_loader,
+            train_loader=train_loader,
+            val_loader=val_loader,
             labels=labels,
+            criterion=criterion,
             device=device,
+            trainer_cfg=trainer_cfg,
+            run_dir=run_dir,
+            labels_payload=labels_payload,
+            epoch_rows=epoch_rows,
+            global_epoch_start=global_epoch,
         )
-        epoch_row = {
-            "epoch": epoch,
-            "train_loss": train_metrics["loss"],
-            "train_accuracy": train_metrics["accuracy"],
-            "val_accuracy": eval_report["accuracy"],
-            "val_macro_f1": eval_report["macro_f1"],
-            "val_weighted_f1": eval_report["weighted_f1"],
-            "train_n": train_metrics["n"],
-            "val_n": eval_report["num_samples"],
-        }
-        if early_stopping_monitor not in epoch_row:
-            raise ValueError(f"early stopping监控指标不存在: {early_stopping_monitor!r}")
-        epoch_rows.append(epoch_row)
-        pd.DataFrame(epoch_rows).to_csv(run_dir / trainer_cfg["epoch_report_file_name"], index=False)
-        predictions.to_csv(run_dir / trainer_cfg["prediction_file_name"], index=False)
-        write_json(run_dir / trainer_cfg["eval_report_file_name"], eval_report)
-
-        checkpoint_path = run_dir / f"{trainer_cfg['checkpoint_prefix']}_epoch{epoch:03d}.pt"
-        save_checkpoint(
-            path=checkpoint_path,
-            model=model,
-            optimizer=optimizer,
-            epoch=epoch,
-            config=trainer_cfg,
-            metrics=epoch_row,
-            labels=labels_payload,
-        )
-        monitor_value = float(epoch_row[early_stopping_monitor])
-        if is_metric_improved(
-            current_value=monitor_value,
-            best_value=best_score,
-            mode=early_stopping_mode,
-            min_delta=early_stopping_min_delta,
-        ):
-            best_score = monitor_value
-            best_epoch = epoch
-            epochs_without_improvement = 0
-            best_checkpoint_path = run_dir / f"{trainer_cfg['checkpoint_prefix']}_best.pt"
-            save_checkpoint(
-                path=best_checkpoint_path,
-                model=model,
-                optimizer=optimizer,
-                epoch=epoch,
-                config=trainer_cfg,
-                metrics=epoch_row,
-                labels=labels_payload,
-            )
-        else:
-            epochs_without_improvement += 1
-        logger.info(
-            "epoch=%d train_loss=%.4f train_acc=%.4f val_acc=%.4f val_macro_f1=%.4f best_%s=%.4f stale_epochs=%d",
-            epoch,
-            float(train_metrics["loss"]),
-            float(train_metrics["accuracy"]),
-            float(eval_report["accuracy"]),
-            float(eval_report["macro_f1"]),
-            early_stopping_monitor,
-            float(best_score) if best_score is not None else float("nan"),
-            epochs_without_improvement,
-        )
-        if early_stopping_enabled and epochs_without_improvement >= early_stopping_patience:
-            stopped_early = True
-            logger.info(
-                "early stopping触发: monitor=%s, mode=%s, patience=%d, best_epoch=%s, best_score=%.4f",
-                early_stopping_monitor,
-                early_stopping_mode,
-                early_stopping_patience,
-                best_epoch,
-                float(best_score) if best_score is not None else float("nan"),
-            )
-            break
+        global_epoch += completed_epochs
+        phase_summaries.append(phase_summary)
 
     write_json(
         run_dir / "run_summary.json",
         {
             "run_dir": str(run_dir),
-            "best_score": best_score,
-            "best_epoch": best_epoch,
-            "early_stopping_monitor": early_stopping_monitor,
-            "early_stopping_mode": early_stopping_mode,
-            "stopped_early": stopped_early,
-            "best_checkpoint_path": str(best_checkpoint_path) if best_checkpoint_path else None,
+            "phase_summaries": phase_summaries,
+            "total_completed_epochs": global_epoch,
             "num_train_samples": int(len(train_df)),
             "num_val_samples": int(len(val_df)),
             "num_classes": int(len(labels)),

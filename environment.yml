@@ -33,6 +33,7 @@ dependencies:
       - accelerate
       - huggingface-hub
       - openai
+      - peft
       - torch
       - torchvision
       - transformers

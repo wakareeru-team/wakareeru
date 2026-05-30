@@ -1,4 +1,5 @@
 import torch
+from peft import LoraConfig, get_peft_model
 from torch import nn
 from transformers import AutoModel
 
@@ -18,6 +19,7 @@ class BackboneLinearClassifier(nn.Module):
         hidden_size = int(self.backbone.config.hidden_size)
         self.classifier = nn.Linear(hidden_size, num_classes)
         self.backbone_frozen = False
+        self.lora_enabled = False
         if freeze_backbone:
             self.freeze_backbone()
 
@@ -31,6 +33,52 @@ class BackboneLinearClassifier(nn.Module):
         for parameter in self.backbone.parameters():
             parameter.requires_grad = True
         self.backbone_frozen = False
+
+    def train_linear_head_only(self) -> None:
+        self.freeze_backbone()
+        for parameter in self.classifier.parameters():
+            parameter.requires_grad = True
+
+    def enable_lora(
+        self,
+        *,
+        r: int,
+        alpha: int,
+        dropout: float,
+        bias: str,
+    ) -> None:
+        if self.lora_enabled:
+            return
+        target_modules = self.attention_linear_module_names()
+        lora_config = LoraConfig(
+            r=r,
+            lora_alpha=alpha,
+            target_modules=target_modules,
+            lora_dropout=dropout,
+            bias=bias,
+        )
+        self.backbone = get_peft_model(self.backbone, lora_config)
+        self.lora_enabled = True
+        self.train_lora_and_head()
+
+    def train_lora_and_head(self) -> None:
+        if not self.lora_enabled:
+            raise RuntimeError("LoRA has not been enabled")
+        for name, parameter in self.backbone.named_parameters():
+            parameter.requires_grad = "lora_" in name
+        for parameter in self.classifier.parameters():
+            parameter.requires_grad = True
+        self.backbone_frozen = False
+
+    def attention_linear_module_names(self) -> list[str]:
+        target_modules = [
+            name
+            for name, module in self.backbone.named_modules()
+            if isinstance(module, nn.Linear) and ".attention." in f".{name}."
+        ]
+        if not target_modules:
+            raise ValueError("No attention linear modules found for LoRA injection")
+        return target_modules
 
     def train(self, mode: bool = True) -> "BackboneLinearClassifier":
         super().train(mode)

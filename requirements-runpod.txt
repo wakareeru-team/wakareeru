@@ -13,6 +13,7 @@ lxml>=5.0
 matplotlib>=3.8
 numpy>=1.26
 openai>=1.99
+peft>=0.13
 pandas>=2.2
 pillow>=10.0
 python-dotenv>=1.0
