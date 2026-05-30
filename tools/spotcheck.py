@@ -38,6 +38,7 @@ SPOTCHECK_CONFIG = {
     "random_seed": 42,
     "gallery_limit": 80,
     "crop_pad_frac": 0.04,
+    "stats_top_n": 30,
 }
 
 CONFIG: dict[str, Any] = {}
@@ -377,6 +378,66 @@ def preview_columns(sample: pd.DataFrame, score_col: str) -> pd.DataFrame:
     return sample[selected].copy()
 
 
+def value_count_table(df: pd.DataFrame, column: str, top_n: int) -> pd.DataFrame:
+    if df.empty or column not in df.columns:
+        return pd.DataFrame(columns=[column, "count", "percent"])
+    counts = (
+        df[column]
+        .fillna("<missing>")
+        .astype(str)
+        .value_counts(dropna=False)
+        .head(max(1, int(top_n)))
+        .rename_axis(column)
+        .reset_index(name="count")
+    )
+    total = max(1, len(df))
+    counts["percent"] = counts["count"] / total
+    return counts
+
+
+def numeric_summary_table(df: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "noise_predicted_prob",
+        "noise_score_v1",
+        "error_rate",
+        "loss_mean_pct_in_label",
+        "mean",
+        "loss_tail_mean",
+        "pred_label_rate",
+        "detector_score",
+    ]
+    rows = []
+    for column in columns:
+        if column not in df.columns:
+            continue
+        values = pd.to_numeric(df[column], errors="coerce").dropna()
+        if values.empty:
+            continue
+        rows.append(
+            {
+                "metric": column,
+                "count": int(values.count()),
+                "mean": float(values.mean()),
+                "std": float(values.std()) if len(values) > 1 else 0.0,
+                "min": float(values.min()),
+                "p25": float(values.quantile(0.25)),
+                "median": float(values.median()),
+                "p75": float(values.quantile(0.75)),
+                "max": float(values.max()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def statistics_tables(df: pd.DataFrame, top_n: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    return (
+        value_count_table(df, "label", top_n),
+        value_count_table(df, "series", top_n),
+        value_count_table(df, "noise_predicted_label", top_n),
+        numeric_summary_table(df),
+    )
+
+
 def summary_markdown(round_name: str, rows: pd.DataFrame, filtered: pd.DataFrame, sample: pd.DataFrame) -> str:
     label_count = sample["label"].nunique() if "label" in sample.columns and not sample.empty else 0
     lr_count = (
@@ -469,6 +530,13 @@ def build_app() -> gr.Blocks:
                     step=1,
                     label="图库显示上限",
                 )
+                stats_top_n = gr.Slider(
+                    5,
+                    80,
+                    value=SPOTCHECK_CONFIG["stats_top_n"],
+                    step=1,
+                    label="统计 Top N",
+                )
                 pad_frac = gr.Slider(0.0, 0.25, value=SPOTCHECK_CONFIG["crop_pad_frac"], step=0.01, label="Crop 外扩比例")
                 load_btn = gr.Button("加载抽样", variant="primary")
                 export_btn = gr.Button("导出当前抽样 CSV")
@@ -476,8 +544,42 @@ def build_app() -> gr.Blocks:
 
             with gr.Column(scale=3):
                 summary = gr.Markdown()
-                gallery = gr.Gallery(label="抽样 crop", columns=4, height=640, object_fit="contain")
-                table = gr.Dataframe(label="抽样明细", interactive=False, wrap=True)
+                with gr.Tabs():
+                    with gr.Tab("样本"):
+                        gallery = gr.Gallery(label="抽样 crop", columns=4, height=640, object_fit="contain")
+                        table = gr.Dataframe(label="抽样明细", interactive=False, wrap=True)
+                    with gr.Tab("统计"):
+                        with gr.Row():
+                            label_bar = gr.BarPlot(
+                                label="标签数量分布",
+                                x="count",
+                                y="label",
+                                title="标签数量分布",
+                                vertical=False,
+                                height=520,
+                            )
+                            series_bar = gr.BarPlot(
+                                label="Series 数量分布",
+                                x="count",
+                                y="series",
+                                title="Series 数量分布",
+                                vertical=False,
+                                height=520,
+                            )
+                        lr_label_bar = gr.BarPlot(
+                            label="LR 预测标签分布",
+                            x="count",
+                            y="noise_predicted_label",
+                            title="LR 预测标签分布",
+                            vertical=False,
+                            height=260,
+                        )
+                        with gr.Row():
+                            label_counts = gr.Dataframe(label="标签数量表", interactive=False, wrap=True)
+                            series_counts = gr.Dataframe(label="Series 数量表", interactive=False, wrap=True)
+                        with gr.Row():
+                            lr_label_counts = gr.Dataframe(label="LR 预测标签表", interactive=False, wrap=True)
+                            numeric_summary = gr.Dataframe(label="数值特征概览", interactive=False, wrap=True)
 
         def on_refresh(loss_round_value):
             choices = score_columns(str(loss_round_value).strip() or "latest")
@@ -498,6 +600,7 @@ def build_app() -> gr.Blocks:
             seed_value,
             gallery_limit_value,
             pad_frac_value,
+            stats_top_n_value,
         ):
             round_name, _ = resolve_loss_round(str(loss_round_value).strip() or "latest")
             rows = load_round_rows(str(loss_round_value).strip() or "latest")
@@ -516,11 +619,22 @@ def build_app() -> gr.Blocks:
                 seed=int(seed_value),
             )
             records = sample.to_dict(orient="records")
+            label_stats, series_stats, lr_label_stats, numeric_stats = statistics_tables(
+                filtered,
+                int(stats_top_n_value),
+            )
             return (
                 records,
                 summary_markdown(round_name, rows, filtered, sample),
                 make_gallery(sample, str(score_col_value), int(gallery_limit_value), float(pad_frac_value)),
                 preview_columns(sample, str(score_col_value)),
+                label_stats,
+                label_stats,
+                series_stats,
+                series_stats,
+                lr_label_stats,
+                lr_label_stats,
+                numeric_stats,
             )
 
         refresh_scores.click(on_refresh, inputs=[loss_round], outputs=[score_col])
@@ -539,8 +653,21 @@ def build_app() -> gr.Blocks:
                 seed,
                 gallery_limit,
                 pad_frac,
+                stats_top_n,
             ],
-            outputs=[records_state, summary, gallery, table],
+            outputs=[
+                records_state,
+                summary,
+                gallery,
+                table,
+                label_bar,
+                label_counts,
+                series_bar,
+                series_counts,
+                lr_label_bar,
+                lr_label_counts,
+                numeric_summary,
+            ],
         )
         export_btn.click(export_sample_csv, inputs=[records_state, loss_round], outputs=[export_file])
 
