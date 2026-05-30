@@ -49,6 +49,7 @@ docker/
   entry.sh                 # RunPod 容器启动脚本；设置 HF cache 与 rclone R2 remote
 data/                      # 生成数据、SQLite、图片、缓存与 review 输出
 tools/                     # 人工 review 等交互式辅助工具；不是自动 pipeline stage
+training/                  # 直接读取最终 dataset 的训练入口；不是数据构建 pipeline stage
 src/crawler/               # 探索性 notebook；不是稳定管线入口
 docs/                      # 项目过程记录与实验说明
 ```
@@ -119,6 +120,14 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 python tools/normalize_image_paths.py
 python tools/normalize_image_paths.py --apply
 ```
+
+训练已导出的最终数据集，先跑 DINOv3 特征缓存上的线性探针基线：
+
+```bash
+python training/train_linear_probe.py
+```
+
+该入口直接读取 `data/dataset/metadata.csv` 与 `data/dataset/images/`，按 `crop_id` 对齐 `data/feature_cache/latest_feature_cache.txt` 指向的 DINOv3 特征缓存；训练产物写入 `data/training_runs/<run_name>/`。训练配置位于 `training.linear_probe`。
 
 开发检查：
 
