@@ -181,25 +181,4 @@ crops_storage:
   metadata_columns: ["image_path", "label_id", "label", "label_en", "manual_reviewed", "series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
   jpeg_quality: 95
 
-training:
-  linear_probe:
-    dataset_dir: "dataset"
-    metadata_file_name: "metadata.csv"
-    label_column: "label"
-    validate_image_files: true
-    feature_cache_dir: "feature_cache"
-    feature_cache_file: "latest"
-    latest_feature_cache_file: "latest_feature_cache.txt"
-    run_dir: "training_runs"
-    seed: 42
-    min_samples_per_class: 3
-    val_ratio: 0.15
-    test_ratio: 0.15
-    batch_size: 256
-    max_epochs: 100
-    patience: 12
-    min_delta: 0.0001
-    learning_rate: 0.001
-    weight_decay: 0.0001
-
   
