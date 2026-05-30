@@ -23,5 +23,5 @@ COPY docker/entry.sh /usr/local/bin/wakareeru-entry
 RUN chmod +x /usr/local/bin/wakareeru-entry
 
 ENTRYPOINT ["/usr/local/bin/wakareeru-entry"]
-CMD ["bash"]
+CMD ["sleep", "infinity"]
 
