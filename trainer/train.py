@@ -138,28 +138,37 @@ def train_one_epoch(
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
+    amp_enabled: bool,
+    amp_dtype: torch.dtype,
 ) -> dict[str, float | int]:
     model.train()
-    loss_sum = 0.0
-    correct_count = 0
+    loss_chunks = []
+    correct_chunks = []
     sample_count = 0
     for batch in tqdm(dataloader, desc="train", unit="batch"):
         pixel_values = batch["pixel_values"].to(device, non_blocking=True)
         labels = batch["labels"].to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
-        logits = model(pixel_values)
-        loss = criterion(logits, labels)
+        with torch.autocast(
+            device_type=device.type,
+            dtype=amp_dtype,
+            enabled=amp_enabled,
+        ):
+            logits = model(pixel_values)
+            loss = criterion(logits, labels)
         loss.backward()
         optimizer.step()
 
         with torch.no_grad():
             preds = logits.argmax(dim=1)
             batch_size = int(labels.numel())
-            loss_sum += float(loss.item()) * batch_size
-            correct_count += int(preds.eq(labels).sum().item())
+            loss_chunks.append(loss.detach() * batch_size)
+            correct_chunks.append(preds.eq(labels).sum().detach())
             sample_count += batch_size
 
+    loss_sum = torch.stack(loss_chunks).sum().item() if loss_chunks else 0.0
+    correct_count = torch.stack(correct_chunks).sum().item() if correct_chunks else 0
     return {
         "loss": loss_sum / max(1, sample_count),
         "accuracy": correct_count / max(1, sample_count),
@@ -181,6 +190,14 @@ def is_metric_improved(
     if mode == "min":
         return current_value < best_value - min_delta
     raise ValueError("trainer.early_stopping_mode必须是'max'或'min'")
+
+
+def get_amp_dtype(dtype_name: str) -> torch.dtype:
+    if dtype_name == "float16":
+        return torch.float16
+    if dtype_name == "bfloat16":
+        return torch.bfloat16
+    raise ValueError("trainer.amp_dtype必须是float16或bfloat16")
 
 
 def prepare_phase(model: BackboneLinearClassifier, phase_cfg: dict[str, Any]) -> None:
@@ -260,6 +277,8 @@ def run_phase(
     )
 
     phase_name = str(phase_cfg["name"])
+    amp_enabled = bool(trainer_cfg["amp_enabled"]) and device.type == "cuda"
+    amp_dtype = get_amp_dtype(str(trainer_cfg["amp_dtype"]))
     early_stopping_enabled = bool(phase_cfg["early_stopping_enabled"])
     early_stopping_monitor = str(phase_cfg["early_stopping_monitor"])
     early_stopping_mode = str(phase_cfg["early_stopping_mode"])
@@ -284,6 +303,8 @@ def run_phase(
             criterion=criterion,
             optimizer=optimizer,
             device=device,
+            amp_enabled=amp_enabled,
+            amp_dtype=amp_dtype,
         )
         eval_report, predictions = evaluate(
             model=model,
