@@ -193,8 +193,11 @@ trainer:
   image_path_column: "image_path"
   label_id_column: "label_id"
   batch_size: 32
-  num_workers: 4
+  num_workers: 12
   pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  drop_last: true
   val_ratio: 0.2
   stratify_split: true
   seed: 42

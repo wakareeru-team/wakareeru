@@ -19,8 +19,8 @@ def evaluate(
     model.eval()
     records = []
     for batch in tqdm(dataloader, desc="eval", unit="batch"):
-        pixel_values = batch["pixel_values"].to(device)
-        y_true = batch["labels"].to(device)
+        pixel_values = batch["pixel_values"].to(device, non_blocking=True)
+        y_true = batch["labels"].to(device, non_blocking=True)
         logits = model(pixel_values)
         probs = torch.softmax(logits, dim=1)
         confidence, y_pred = probs.max(dim=1)

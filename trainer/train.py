@@ -109,20 +109,26 @@ def make_dataloader(
     trainer_cfg: dict[str, Any],
     train: bool,
 ) -> DataLoader:
+    num_workers = int(trainer_cfg["num_workers"])
+    dataloader_kwargs = {
+        "batch_size": int(trainer_cfg["batch_size"]),
+        "shuffle": train,
+        "num_workers": num_workers,
+        "collate_fn": CropCollator(processor),
+        "pin_memory": bool(trainer_cfg["pin_memory"]),
+        "drop_last": train and bool(trainer_cfg["drop_last"]),
+    }
+    if num_workers > 0:
+        dataloader_kwargs["persistent_workers"] = bool(trainer_cfg["persistent_workers"])
+        dataloader_kwargs["prefetch_factor"] = int(trainer_cfg["prefetch_factor"])
+
     dataset = CropDataset(
         metadata=metadata,
         dataset_root=dataset_root,
         image_path_column=trainer_cfg["image_path_column"],
         label_id_column=trainer_cfg["label_id_column"],
     )
-    return DataLoader(
-        dataset,
-        batch_size=int(trainer_cfg["batch_size"]),
-        shuffle=train,
-        num_workers=int(trainer_cfg["num_workers"]),
-        collate_fn=CropCollator(processor),
-        pin_memory=bool(trainer_cfg["pin_memory"]),
-    )
+    return DataLoader(dataset, **dataloader_kwargs)
 
 
 def train_one_epoch(
@@ -138,8 +144,8 @@ def train_one_epoch(
     correct_count = 0
     sample_count = 0
     for batch in tqdm(dataloader, desc="train", unit="batch"):
-        pixel_values = batch["pixel_values"].to(device)
-        labels = batch["labels"].to(device)
+        pixel_values = batch["pixel_values"].to(device, non_blocking=True)
+        labels = batch["labels"].to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
         logits = model(pixel_values)

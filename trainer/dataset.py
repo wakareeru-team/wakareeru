@@ -31,19 +31,31 @@ class CropDataset(Dataset):
             raise ValueError(f"metadata缺少必要列: {sorted(missing_columns)}")
         if self.metadata[label_id_column].isna().any():
             raise ValueError(f"metadata列 {label_id_column!r} 存在空标签")
+        self.image_paths = [
+            str(path).replace("\\", "/")
+            for path in self.metadata[image_path_column].tolist()
+        ]
+        self.full_paths = [
+            self.dataset_root / image_path
+            for image_path in self.image_paths
+        ]
+        self.labels = [
+            int(label)
+            for label in self.metadata[label_id_column].tolist()
+        ]
 
     def __len__(self) -> int:
         return len(self.metadata)
 
     def __getitem__(self, index: int) -> dict[str, Any]:
-        row = self.metadata.iloc[index]
-        image_path = str(row[self.image_path_column]).replace("\\", "/")
-        full_path = self.dataset_root / image_path
+        image_path = self.image_paths[index]
+        full_path = self.full_paths[index]
         with Image.open(full_path) as image:
             image = image.convert("RGB")
+            image.load()
             return {
                 "image": image.copy(),
-                "label": int(row[self.label_id_column]),
+                "label": self.labels[index],
                 "sample_index": index,
                 "image_path": image_path,
             }
