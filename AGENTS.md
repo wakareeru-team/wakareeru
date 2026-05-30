@@ -49,6 +49,7 @@ docker/
   entry.sh                 # RunPod 容器启动脚本；设置 HF cache 与 rclone R2 remote
 data/                      # 生成数据、SQLite、图片、缓存与 review 输出
 tools/                     # 人工 review 等交互式辅助工具；不是自动 pipeline stage
+trainer/                   # crop 图像训练模块；当前从冻结 backbone + 线性头开始
 src/crawler/               # 探索性 notebook；不是稳定管线入口
 docs/                      # 项目过程记录与实验说明
 ```
@@ -110,6 +111,12 @@ python tools/loss_round_spotcheck_gradio.py
 
 ```bash
 python tools/label_review_gradio.py
+```
+
+启动 crop 图像线性头训练：
+
+```bash
+python -m trainer.train
 ```
 
 从人工复核 CSV 导入 review overlay（路径相对 `path.data_root` 解析，用 stable key + bbox IoU 匹配，不依赖自增 id）：
@@ -199,6 +206,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。`loss_tracking` 会按 `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 过滤人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。详细设计见 `docs/noise_review_loop.md`。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。`manual_correction_invalidate_metadata_columns` 控制人工纠正标签后需要清空的原图分类路径派生 metadata；随后 `manual_correction_refill_operator_columns` 中的 operator 字段只有同 label 唯一非空值时补齐，`manual_correction_refill_submodel_bandai_columns` 作为一对只有唯一非空组合时才一起补齐。
+- `trainer.*` 控制 crop 图像训练入口；当前默认冻结 `backbone_model_name` 并只训练线性分类头，报告和 checkpoint 写入 `trainer.output_dir`。
 
 ## 维护边界
 
