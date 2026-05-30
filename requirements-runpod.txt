@@ -1,10 +1,6 @@
 # RunPod / GPU image requirements for Wakareeru.
 # The base image is expected to already provide torch and torchvision.
 
-# Keep this below 4.57 for the RunPod torch 2.4 base image; newer
-# transformers imports torch.distributed.tensor.device_mesh.
-transformers>=4.56,<4.57
-
 accelerate>=0.34
 aiofiles>=23.0
 beautifulsoup4>=4.12
@@ -27,4 +23,4 @@ rich>=13.0
 scikit-learn>=1.4
 tenacity>=8.2
 tqdm>=4.66
-
+transformers>=4.57

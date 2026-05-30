@@ -36,4 +36,4 @@ dependencies:
       - peft
       - torch
       - torchvision
-      - "transformers>=4.56,<4.57"
+      - "transformers>=4.57"
