@@ -198,6 +198,8 @@ trainer:
   persistent_workers: true
   prefetch_factor: 4
   drop_last: true
+  amp_enabled: true
+  amp_dtype: "bfloat16"
   val_ratio: 0.2
   stratify_split: true
   seed: 42
