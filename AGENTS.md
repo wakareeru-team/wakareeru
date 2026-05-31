@@ -106,6 +106,12 @@ python tools/noise_review_gradio.py
 python tools/loss_round_spotcheck_gradio.py
 ```
 
+启动 label 分布与抽样复核 UI（显示 label 规模差距，并支持跨 label 抽样与 crop 级修正标签）：
+
+```bash
+python tools/label_review_gradio.py
+```
+
 从人工复核 CSV 导入 review overlay（路径相对 `path.data_root` 解析，用 stable key + bbox IoU 匹配，不依赖自增 id）：
 
 ```bash
