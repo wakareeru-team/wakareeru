@@ -39,6 +39,7 @@ SPOTCHECK_CONFIG = {
     "gallery_limit": 80,
     "crop_pad_frac": 0.04,
     "stats_top_n": 30,
+    "skip_reviewed": True,
 }
 
 CONFIG: dict[str, Any] = {}
@@ -513,7 +514,10 @@ def build_app() -> gr.Blocks:
                     placeholder="可选，例如 E231",
                 )
                 only_mismatch = gr.Checkbox(value=False, label="只看 label != 线性头预测")
-                skip_reviewed = gr.Checkbox(value=False, label="跳过已人工复核 crop")
+                skip_reviewed = gr.Checkbox(
+                    value=SPOTCHECK_CONFIG["skip_reviewed"],
+                    label="跳过已人工复核 crop",
+                )
                 sample_size = gr.Slider(1, 300, value=SPOTCHECK_CONFIG["sample_size"], step=1, label="抽样数量")
                 samples_per_label = gr.Slider(
                     1,

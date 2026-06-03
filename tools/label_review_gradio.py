@@ -35,7 +35,8 @@ from pipeline import constants, utils  # noqa: E402
 LABEL_REVIEW_CONFIG = {
     "label_granularity": "config",
     "crop_status": "all",
-    "sample_mode": "label_balanced_random",
+    "loss_round": "latest",
+    "sample_mode": "lr_auto_filtered",
     "samples_per_label": 3,
     "sample_size": 120,
     "random_seed": 42,
@@ -160,11 +161,82 @@ def metadata_sql(label_granularity: str, crop_status: str) -> str:
     """
 
 
-def load_rows(label_granularity: str, crop_status: str) -> pd.DataFrame:
+def resolve_loss_round(loss_round: str) -> tuple[str, Path]:
+    active_round = str(loss_round).strip() or "latest"
+    round_dir = utils.get_loss_round_dir(config=CONFIG, active_round=active_round)
+    return round_dir.name, round_dir
+
+
+def load_loss_features(loss_round: str) -> pd.DataFrame:
+    _, round_dir = resolve_loss_round(loss_round)
+    feature_path = round_dir / CONFIG["loss_analysis"]["loss_feature_file_name"]
+    if not feature_path.exists():
+        return pd.DataFrame()
+    features = pd.read_csv(feature_path)
+    if "crop_id" not in features.columns:
+        raise ValueError(f"Loss feature CSV missing required column: {feature_path}")
+    features["crop_id"] = features["crop_id"].astype(int)
+    keep_cols = [
+        "crop_id",
+        "mean",
+        "loss_tail_mean",
+        "loss_mean_pct_in_label",
+        "error_rate",
+        "pred_label",
+        "pred_label_rate",
+        "noise_score_v1",
+    ]
+    return features[[col for col in keep_cols if col in features.columns]].copy()
+
+
+def load_lr_prediction_file(loss_round: str) -> pd.DataFrame:
+    _, round_dir = resolve_loss_round(loss_round)
+    prediction_path = round_dir / CONFIG["lr_prediction"]["prediction_file_name"]
+    if not prediction_path.exists():
+        return pd.DataFrame()
+    predictions = pd.read_csv(prediction_path)
+    if "crop_id" not in predictions.columns:
+        raise ValueError(f"LR prediction CSV missing required column: {prediction_path}")
+    keep_cols = [
+        "crop_id",
+        "mean",
+        "loss_tail_mean",
+        "loss_mean_pct_in_label",
+        "error_rate",
+        "pred_label",
+        "pred_label_rate",
+        "noise_score_v1",
+        "noise_predicted_prob",
+        "noise_predicted_label",
+        "noise_prediction_model",
+        "predicted_at",
+    ]
+    predictions = predictions[[col for col in keep_cols if col in predictions.columns]].copy()
+    predictions["crop_id"] = predictions["crop_id"].astype(int)
+    return predictions.drop_duplicates("crop_id", keep="last")
+
+
+def load_rows(label_granularity: str, crop_status: str, loss_round: str) -> pd.DataFrame:
     ensure_review_columns()
     with sqlite3.connect(DB_PATH) as conn:
         rows = pd.read_sql_query(metadata_sql(label_granularity, crop_status), conn)
     rows["label"] = rows["label"].fillna(rows["series"]).astype(str)
+    rows["crop_id"] = rows["crop_id"].astype(int)
+    features = load_loss_features(loss_round)
+    if not features.empty:
+        rows = rows.merge(features, on="crop_id", how="left")
+    predictions = load_lr_prediction_file(loss_round)
+    if not predictions.empty:
+        overlap_cols = sorted((set(rows.columns) & set(predictions.columns)) - {"crop_id", "label"})
+        renamed_predictions = predictions.rename(
+            columns={col: f"prediction_{col}" for col in overlap_cols}
+        )
+        rows = rows.merge(renamed_predictions, on="crop_id", how="left")
+        for col in overlap_cols:
+            prediction_col = f"prediction_{col}"
+            rows[col] = rows[prediction_col].fillna(rows[col])
+    if "noise_predicted_prob" in rows.columns:
+        rows["noise_predicted_prob"] = pd.to_numeric(rows["noise_predicted_prob"], errors="coerce")
     if "manual_corrected_label" in rows.columns:
         corrected = rows["manual_corrected_label"].fillna("").astype(str).str.strip()
         rows["effective_label"] = rows["label"].where(corrected == "", corrected)
@@ -178,6 +250,9 @@ def known_label_choices(rows: pd.DataFrame) -> list[str]:
     if "manual_corrected_label" in rows.columns:
         corrected = rows["manual_corrected_label"].dropna().astype(str).str.strip()
         labels.update(label for label in corrected if label)
+    if "pred_label" in rows.columns:
+        predicted = rows["pred_label"].dropna().astype(str).str.strip()
+        labels.update(label for label in predicted if label)
     return sorted(labels)
 
 
@@ -285,6 +360,36 @@ def sample_rows(
     if sample_mode == "proportional_random":
         return rows.sample(n=min(sample_size, len(rows)), random_state=seed).reset_index(drop=True)
 
+    if sample_mode == "lr_auto_filtered":
+        required_cols = {"noise_predicted_label", "noise_predicted_prob"}
+        if not required_cols.issubset(rows.columns):
+            raise gr.Error("当前数据没有 LR 预测列。请先运行 stage 13，或确认当前 loss round 有 lr_predictions.csv。")
+        predicted_labels = set(CONFIG["crops_storage"]["predicted_noise_labels"])
+        min_prob = float(CONFIG["crops_storage"]["predicted_noise_min_prob"])
+        review_label = rows.get("noise_review_label", pd.Series("", index=rows.index)).fillna("").astype(str).str.strip()
+        corrected = rows.get("manual_corrected_label", pd.Series("", index=rows.index)).fillna("").astype(str).str.strip()
+        work = rows[
+            review_label.eq("")
+            & corrected.eq("")
+            & rows["noise_predicted_label"].isin(predicted_labels)
+            & (rows["noise_predicted_prob"].fillna(0.0) >= min_prob)
+        ].copy()
+        if work.empty:
+            return work
+        if "pred_label" in work.columns:
+            work["has_pred_label"] = work["pred_label"].notna() & work["pred_label"].astype(str).str.strip().ne("")
+            return (
+                work.sort_values(["has_pred_label", "noise_predicted_prob"], ascending=[False, False])
+                .drop(columns=["has_pred_label"])
+                .head(sample_size)
+                .reset_index(drop=True)
+            )
+        return (
+            work.sort_values("noise_predicted_prob", ascending=False)
+            .head(sample_size)
+            .reset_index(drop=True)
+        )
+
     if sample_mode == "corrected":
         if "manual_corrected_label" not in rows.columns:
             return rows.head(0)
@@ -317,6 +422,11 @@ def caption_for_row(row: dict[str, Any]) -> str:
         parts.append(f"series={row.get('series')}")
     if row.get("detector_score") is not None and row.get("detector_score") == row.get("detector_score"):
         parts.append(f"det={float(row['detector_score']):.3f}")
+    if row.get("noise_predicted_prob") is not None and row.get("noise_predicted_prob") == row.get("noise_predicted_prob"):
+        parts.append(f"LR={float(row['noise_predicted_prob']):.3f}")
+    pred_label = row.get("pred_label")
+    if pred_label is not None and pred_label == pred_label and str(pred_label).strip():
+        parts.append(f"pred={row.get('pred_label')}")
     return " | ".join(parts)
 
 
@@ -463,6 +573,11 @@ def preview_columns(sample: pd.DataFrame) -> pd.DataFrame:
         "detector_score",
         "noise_review_label",
         "manual_corrected_label",
+        "noise_predicted_prob",
+        "noise_predicted_label",
+        "pred_label",
+        "pred_label_rate",
+        "error_rate",
         "file_title",
         "category",
         "downloaded_path",
@@ -494,6 +609,14 @@ def summary_markdown(rows: pd.DataFrame, filtered: pd.DataFrame, sample: pd.Data
         f"- **已复核 / 已修正**: {reviewed} / {corrected}",
         f"- **label count min / median / max**: {min_count} / {median_count:.1f} / {max_count}",
     ]
+    if {"noise_predicted_label", "noise_predicted_prob"}.issubset(filtered.columns):
+        predicted_labels = set(CONFIG["crops_storage"]["predicted_noise_labels"])
+        min_prob = float(CONFIG["crops_storage"]["predicted_noise_min_prob"])
+        auto_filtered = (
+            filtered["noise_predicted_label"].isin(predicted_labels)
+            & (filtered["noise_predicted_prob"].fillna(0.0) >= min_prob)
+        )
+        lines.append(f"- **LR 自动过滤候选**: {int(auto_filtered.sum())} @ prob>={min_prob:g}")
     return "\n".join(lines)
 
 
@@ -516,6 +639,11 @@ def display_record(records: list[dict[str, Any]], idx: int, pad_frac: float):
         ("formation", row.get("special_formation")),
         ("livery", row.get("special_livery")),
         ("detector_score", f"{float(row.get('detector_score')):.4f}" if pd.notna(row.get("detector_score")) else None),
+        ("LR_predicted_label", row.get("noise_predicted_label")),
+        ("LR_predicted_prob", f"{float(row.get('noise_predicted_prob')):.4f}" if pd.notna(row.get("noise_predicted_prob")) else None),
+        ("linear_head_pred_label", row.get("pred_label")),
+        ("linear_head_pred_label_rate", f"{float(row.get('pred_label_rate')):.4f}" if pd.notna(row.get("pred_label_rate")) else None),
+        ("error_rate", f"{float(row.get('error_rate')):.4f}" if pd.notna(row.get("error_rate")) else None),
         ("review_label", row.get("noise_review_label")),
         ("manual_corrected_label", row.get("manual_corrected_label")),
         ("file_title", row.get("file_title")),
@@ -609,8 +737,14 @@ def build_app() -> gr.Blocks:
                     value=LABEL_REVIEW_CONFIG["crop_status"],
                     label="Crop status",
                 )
+                loss_round = gr.Textbox(
+                    value=LABEL_REVIEW_CONFIG["loss_round"],
+                    label="Loss round",
+                    placeholder="latest or 20260528_214343",
+                )
                 sample_mode = gr.Radio(
                     choices=[
+                        ("LR 自动过滤样本", "lr_auto_filtered"),
                         ("按 label 均衡随机", "label_balanced_random"),
                         ("优先小 label", "rare_labels"),
                         ("优先大 label", "large_labels"),
@@ -677,6 +811,9 @@ def build_app() -> gr.Blocks:
                                 with gr.Row():
                                     ok_btn = gr.Button("OK", variant="secondary")
                                     wrong_btn = gr.Button("Wrong Label", variant="secondary")
+                                with gr.Row():
+                                    use_pred_btn = gr.Button("Use Pred Label", variant="secondary")
+                                    wrong_pred_btn = gr.Button("Wrong = Pred & next", variant="primary")
                                 save_next_btn = gr.Button("Save & next", variant="primary")
                     with gr.Tab("图库"):
                         gallery = gr.HTML(label="按 label 分组的抽样 crop")
@@ -695,6 +832,7 @@ def build_app() -> gr.Blocks:
         def on_load(
             label_granularity_value,
             crop_status_value,
+            loss_round_value,
             sample_mode_value,
             label_query_value,
             skip_reviewed_value,
@@ -706,7 +844,11 @@ def build_app() -> gr.Blocks:
             stats_top_n_value,
             pad_frac_value,
         ):
-            rows = load_rows(str(label_granularity_value), str(crop_status_value))
+            rows = load_rows(
+                str(label_granularity_value),
+                str(crop_status_value),
+                str(loss_round_value or "latest"),
+            )
             filtered = filter_rows(
                 rows,
                 str(label_query_value or ""),
@@ -785,11 +927,34 @@ def build_app() -> gr.Blocks:
         def quick_save(records, idx, note_value, corrected_label_value, pad_frac_value, review_label_value):
             return on_save_next(records, idx, review_label_value, note_value, corrected_label_value, pad_frac_value)
 
+        def current_pred_label(records, idx):
+            records = records or []
+            if not records:
+                raise gr.Error("当前没有抽样结果，请先加载。")
+            idx = max(0, min(int(idx), len(records) - 1))
+            raw_pred_label = records[idx].get("pred_label")
+            pred_label = "" if raw_pred_label is None or raw_pred_label != raw_pred_label else str(raw_pred_label).strip()
+            if not pred_label:
+                raise gr.Error("当前样本没有线性头预测 label。请确认当前 loss round 的 loss feature 包含 pred_label。")
+            return pred_label
+
+        def wrong_with_pred_label(records, idx, note_value, pad_frac_value):
+            pred_label = current_pred_label(records, idx)
+            return on_save_next(
+                records,
+                idx,
+                constants.NOISE_REVIEW_LABEL_WRONG_LABEL,
+                note_value,
+                pred_label,
+                pad_frac_value,
+            )
+
         load_btn.click(
             on_load,
             inputs=[
                 label_granularity,
                 crop_status,
+                loss_round,
                 sample_mode,
                 label_query,
                 skip_reviewed,
@@ -855,6 +1020,16 @@ def build_app() -> gr.Blocks:
                 constants.NOISE_REVIEW_LABEL_WRONG_LABEL,
             ),
             inputs=[records_state, idx_state, note, corrected_label, pad_frac],
+            outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
+        )
+        use_pred_btn.click(
+            current_pred_label,
+            inputs=[records_state, idx_state],
+            outputs=[corrected_label],
+        )
+        wrong_pred_btn.click(
+            wrong_with_pred_label,
+            inputs=[records_state, idx_state, note, pad_frac],
             outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
         )
         export_btn.click(export_sample_csv, inputs=[records_state], outputs=[export_file])
