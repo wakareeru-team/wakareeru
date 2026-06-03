@@ -207,6 +207,15 @@ def load_or_create_feature_cache(
                 "linear head特征缓存样本数与当前train/val切分不一致，"
                 "请设置feature_cache_rebuild=true后重建。"
             )
+        image_path_column = trainer_cfg["image_path_column"]
+        train_paths = [str(path).replace("\\", "/") for path in train_df[image_path_column].tolist()]
+        val_paths = [str(path).replace("\\", "/") for path in val_df[image_path_column].tolist()]
+        if cache["train"]["image_paths"] != train_paths or cache["val"]["image_paths"] != val_paths:
+            raise ValueError(
+                "linear head特征缓存的image_path顺序与当前train/val切分不一致，"
+                "请设置feature_cache_rebuild=true后重建。"
+            )
+        validate_feature_cache(cache)
         return cache
 
     logger.info("开始生成linear head特征缓存: %s", feature_cache_path)
@@ -236,20 +245,36 @@ def load_or_create_feature_cache(
             model=model,
             dataloader=train_feature_loader,
             device=device,
-            amp_enabled=amp_enabled,
+            amp_enabled=bool(phase_cfg["feature_cache_amp_enabled"]) and amp_enabled,
             amp_dtype=amp_dtype,
         ),
         "val": extract_feature_table(
             model=model,
             dataloader=val_feature_loader,
             device=device,
-            amp_enabled=amp_enabled,
+            amp_enabled=bool(phase_cfg["feature_cache_amp_enabled"]) and amp_enabled,
             amp_dtype=amp_dtype,
         ),
     }
+    validate_feature_cache(cache)
     torch.save(cache, feature_cache_path)
     logger.info("linear head特征缓存已保存: %s", feature_cache_path)
     return cache
+
+
+def validate_feature_cache(cache: dict[str, Any]) -> None:
+    for split in ("train", "val"):
+        features = cache[split]["features"]
+        labels = cache[split]["labels"]
+        if not torch.isfinite(features).all():
+            nan_count = int(torch.isnan(features).sum().item())
+            inf_count = int(torch.isinf(features).sum().item())
+            raise ValueError(
+                f"linear head特征缓存包含非有限feature: split={split}, "
+                f"nan={nan_count}, inf={inf_count}。请删除缓存或设置feature_cache_rebuild=true后重建。"
+            )
+        if labels.numel() == 0:
+            raise ValueError(f"linear head特征缓存为空: split={split}")
 
 
 def make_feature_dataloader(
@@ -300,6 +325,8 @@ def train_one_epoch(
         ):
             logits = model(pixel_values)
             loss = criterion(logits, labels)
+        if not torch.isfinite(loss):
+            raise FloatingPointError("训练中出现非有限loss，请检查输入、AMP和学习率。")
         loss.backward()
         optimizer.step()
 
@@ -344,6 +371,8 @@ def train_feature_head_one_epoch(
         ):
             logits = model.classifier(features)
             loss = criterion(logits, labels)
+        if not torch.isfinite(loss):
+            raise FloatingPointError("feature linear head训练中出现非有限loss，请重建特征缓存或关闭AMP。")
         loss.backward()
         optimizer.step()
         with torch.no_grad():
@@ -385,6 +414,8 @@ def evaluate_feature_head(
             enabled=amp_enabled,
         ):
             logits = model.classifier(features)
+        if not torch.isfinite(logits).all():
+            raise FloatingPointError("feature linear head验证中出现非有限logits，请重建特征缓存或降低学习率。")
         probs = torch.softmax(logits, dim=1)
         confidence, y_pred = probs.max(dim=1)
         for i, sample_index in enumerate(sample_indices_cpu.tolist()):
@@ -569,7 +600,7 @@ def run_phase(
                 criterion=criterion,
                 optimizer=optimizer,
                 device=device,
-                amp_enabled=amp_enabled,
+                amp_enabled=False,
                 amp_dtype=amp_dtype,
             )
             eval_report, predictions = evaluate_feature_head(
@@ -578,7 +609,7 @@ def run_phase(
                 feature_table=feature_cache["val"],
                 labels=labels,
                 device=device,
-                amp_enabled=amp_enabled,
+                amp_enabled=False,
                 amp_dtype=amp_dtype,
             )
         else:

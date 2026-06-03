@@ -216,6 +216,7 @@ trainer:
       use_feature_cache: true
       feature_cache_file_name: "linear_head_warmup_features.pt"
       feature_cache_rebuild: false
+      feature_cache_amp_enabled: false
       learning_rate: 1e-3
       weight_decay: 1e-4
       lora_r: 8
@@ -235,6 +236,7 @@ trainer:
       use_feature_cache: false
       feature_cache_file_name: "unused_lora_features.pt"
       feature_cache_rebuild: false
+      feature_cache_amp_enabled: false
       weight_decay: 1e-4
       lora_r: 8
       lora_alpha: 16
