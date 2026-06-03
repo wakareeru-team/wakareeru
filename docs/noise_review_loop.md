@@ -160,5 +160,5 @@ noise_detection:
 - 先按配置过滤人工噪声和预测噪声。
 - 有 `manual_corrected_label` 的样本不会因为旧预测噪声而被过滤。
 - 导出标签优先使用 `manual_corrected_label`。
-- 人工纠正样本会按 `crops_storage.manual_correction_invalidate_metadata_columns` 清空原图分类路径派生的细节 metadata，避免旧标签语境下的番台、运营公司、特殊编成或特殊涂装继续污染导出。
+- 人工纠正样本会按 `crops_storage.manual_correction_invalidate_metadata_columns` 清空原图分类路径派生的细节 metadata，避免旧标签语境下的番台、运营公司、特殊编成或特殊涂装继续污染导出。随后会从未纠正的同 label 导出候选中保守反查补齐：`manual_correction_refill_operator_columns` 中的 operator 字段只有唯一非空值时补齐；`manual_correction_refill_submodel_bandai_columns` 作为一对，只有唯一非空组合时才一起补齐。
 - `metadata.manual_reviewed` 仍只表示人工复核为 `ok` 的高确信样本；人工纠正样本的正确标签通过 `label` 字段体现。
