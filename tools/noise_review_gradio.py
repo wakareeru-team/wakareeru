@@ -533,6 +533,8 @@ def build_review_app():
                     quick_ok_btn = gr.Button("OK", variant="secondary")
                     quick_wrong_label_btn = gr.Button("Wrong Label", variant="secondary")
                 with gr.Row():
+                    quick_wrong_pred_btn = gr.Button("Wrong = Pred & next", variant="primary")
+                with gr.Row():
                     quick_out_of_label_space_btn = gr.Button("Out of Label Space", variant="secondary")
                     quick_bad_crop_btn = gr.Button("Bad Crop", variant="stop")
                 with gr.Row():
@@ -632,6 +634,30 @@ def build_review_app():
         def on_quick_save_next(records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value, label):
             return on_save_next(records, idx, label, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value)
 
+        def current_pred_label(records, idx):
+            records = records or []
+            if not records:
+                raise gr.Error("当前没有 sample，请先 Load / resample。")
+            idx = max(0, min(int(idx), len(records) - 1))
+            raw_pred_label = records[idx].get("pred_label")
+            pred_label = "" if raw_pred_label is None or raw_pred_label != raw_pred_label else str(raw_pred_label).strip()
+            if not pred_label:
+                raise gr.Error("当前样本没有 pred_label。请切换到 score_source=loss_round，并确认该轮 loss feature 包含 pred_label。")
+            return pred_label
+
+        def on_wrong_pred_next(records, idx, note_value, score_source_value, loss_round_value, score_col_value):
+            pred_label = current_pred_label(records, idx)
+            return on_save_next(
+                records,
+                idx,
+                constants.NOISE_REVIEW_LABEL_WRONG_LABEL,
+                note_value,
+                pred_label,
+                score_source_value,
+                loss_round_value,
+                score_col_value,
+            )
+
         def on_skip(records, idx):
             records = records or []
             if not records:
@@ -684,6 +710,11 @@ def build_review_app():
                 records, idx, note_value, corrected_label_value, score_source_value, loss_round_value, score_col_value, constants.NOISE_REVIEW_LABEL_WRONG_LABEL
             ),
             inputs=[records_state, idx_state, note, corrected_label, score_source, loss_round, score_col],
+            outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
+        )
+        quick_wrong_pred_btn.click(
+            on_wrong_pred_next,
+            inputs=[records_state, idx_state, note, score_source, loss_round, score_col],
             outputs=[records_state, idx_state, image, meta, review_label, note, corrected_label, progress],
         )
         quick_out_of_label_space_btn.click(

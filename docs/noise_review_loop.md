@@ -118,6 +118,35 @@ stage_13 lr_prediction
 
 如果预测 CSV 不存在，`stage_10` 会跳过预测噪声过滤；如果 CSV 缺必要列，则直接报错。
 
+## 修改 Stage 8 Label Space 后的重跑
+
+`stage_08_fine_grain_series.py` 会更新 DB 中的 `images.fine_grained_series`。如果只修改了细粒度标签规则或 `manual_fine_grained_series.csv`，DINO feature cache 通常仍然可复用，因为 `stage_09` 只缓存 crop 图像特征和 `crop_id`，不绑定标签体系。
+
+已经生成的 loss round 不会因为 stage 8 规则变化而自动更新。该轮目录中的 `label_map.json`、loss history、loss feature 和 LR prediction 都仍然对应生成它们时的 label space。
+
+推荐流程是先重跑新标签空间下的 loss round：
+
+```bash
+python pipeline_entry.py --stages "8 10 11"
+```
+
+人工复核当前新 round 的样本后，再继续：
+
+```bash
+python pipeline_entry.py --stages "12 13"
+```
+
+如果 `loss_analysis.request_manual_review=true`，管线会在 `stage_11` 后中断，等待人工复核；这时直接跑 `8-12` 不一定会进入 `stage_12`。
+
+修改 label space 后，不建议继续用旧 label space 下训练出的 LR prediction 过滤新一轮样本。为了避免旧预测影响新 loss 特征，可在新一轮 `stage_10` 前临时关闭：
+
+```yaml
+noise_detection:
+  exclude_predicted_noise: false
+```
+
+待新 label space 下完成 `stage_12` / `stage_13` 后，再恢复预测噪声过滤。另需注意，`manual_corrected_label` 是 crop 级 overlay，不会被 stage 8 自动改写；如果标签被改名、合并或拆分，应检查已有人工纠正标签是否仍在当前 label space 内。
+
 ## 为什么不默认沿用旧 LR 模型
 
 每一轮 `stage_10` 都可能使用不同的训练集合重新训练线性头，因此 `stage_11` 生成的 loss feature 分布会变化。旧 LR 模型的阈值和概率校准可能不再适合新一轮 loss feature。
@@ -131,4 +160,5 @@ stage_13 lr_prediction
 - 先按配置过滤人工噪声和预测噪声。
 - 有 `manual_corrected_label` 的样本不会因为旧预测噪声而被过滤。
 - 导出标签优先使用 `manual_corrected_label`。
+- 人工纠正样本会按 `crops_storage.manual_correction_invalidate_metadata_columns` 清空原图分类路径派生的细节 metadata，避免旧标签语境下的番台、运营公司、特殊编成或特殊涂装继续污染导出。随后会从未纠正的同 label 导出候选中保守反查补齐：`manual_correction_refill_operator_columns` 中的 operator 字段只有唯一非空值时补齐；`manual_correction_refill_submodel_bandai_columns` 作为一对，只有唯一非空组合时才一起补齐。
 - `metadata.manual_reviewed` 仍只表示人工复核为 `ok` 的高确信样本；人工纠正样本的正确标签通过 `label` 字段体现。
