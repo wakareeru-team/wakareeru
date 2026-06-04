@@ -212,7 +212,7 @@ trainer:
   phases:
     - name: "linear_head_warmup"
       train_mode: "linear_head"
-      epochs: 15
+      epochs: 30
       use_feature_cache: true
       feature_cache_file_name: "linear_head_warmup_features.pt"
       feature_cache_rebuild: false
