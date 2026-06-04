@@ -64,12 +64,26 @@ class CropDataset(Dataset):
 class CropCollator:
     """Batch PIL crop images with a model-specific image processor."""
 
-    def __init__(self, processor: Any) -> None:
+    def __init__(self, processor: Any, image_size: int) -> None:
         self.processor = processor
+        self.image_size = int(image_size)
 
     def __call__(self, batch: list[dict[str, Any]]) -> dict[str, Any]:
         images = [item["image"] for item in batch]
-        encoded = self.processor(images=images, return_tensors="pt")
+        processor_kwargs = {
+            "images": images,
+            "return_tensors": "pt",
+            "size": {
+                "height": self.image_size,
+                "width": self.image_size,
+            },
+        }
+        if getattr(self.processor, "crop_size", None) is not None:
+            processor_kwargs["crop_size"] = {
+                "height": self.image_size,
+                "width": self.image_size,
+            }
+        encoded = self.processor(**processor_kwargs)
         return {
             "pixel_values": encoded["pixel_values"],
             "labels": torch.tensor([item["label"] for item in batch], dtype=torch.long),

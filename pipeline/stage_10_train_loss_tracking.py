@@ -243,6 +243,24 @@ def attach_current_labels_to_feature_cache(
     }
 
 
+def validate_feature_cache_image_size(feature_cache: dict, noise_detection_cfg: dict) -> None:
+    expected_image_size = utils.validate_vit_image_size(
+        noise_detection_cfg["image_size"],
+        "noise_detection.image_size",
+    )
+    if "image_size" not in feature_cache:
+        raise ValueError(
+            "特征缓存缺少 image_size 元数据，请重跑 feature_extraction 阶段生成新缓存。"
+        )
+    cached_image_size = int(feature_cache["image_size"])
+    if cached_image_size != expected_image_size:
+        raise ValueError(
+            "特征缓存的 image_size 与当前 noise_detection.image_size 不一致："
+            f"cache={cached_image_size}, config={expected_image_size}。"
+            "请重跑 feature_extraction 阶段生成新缓存。"
+        )
+
+
 def load_prediction_overlay(config: dict) -> pd.DataFrame | None:
     noise_detection_cfg = config["noise_detection"]
     if not noise_detection_cfg["exclude_predicted_noise"]:
@@ -330,6 +348,7 @@ def main(config: dict | None = None) -> None:
 
     feature_cache_file = resolve_feature_cache_file(active_feature_cache_file, latest_feature_cache_path)
     raw_feature_cache = torch.load(feature_cache_dir / feature_cache_file, map_location="cpu")
+    validate_feature_cache_image_size(raw_feature_cache, noise_detection_cfg)
     prediction_overlay = load_prediction_overlay(config)
     feature_cache = attach_current_labels_to_feature_cache(
         raw_feature_cache,

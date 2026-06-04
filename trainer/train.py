@@ -26,6 +26,15 @@ from trainer.model import BackboneLinearClassifier
 logger = utils.get_logger("trainer")
 
 
+def validate_image_size(image_size: int) -> int:
+    image_size = int(image_size)
+    if image_size < 1:
+        raise ValueError("trainer.image_size必须是正整数")
+    if image_size % 16 != 0:
+        logger.warning("trainer.image_size=%d不是16的倍数，ViT patch输入可能产生额外插值或截断。", image_size)
+    return image_size
+
+
 def get_torch_device(device_name: str) -> torch.device:
     if device_name == "auto":
         if torch.backends.mps.is_available():
@@ -117,11 +126,12 @@ def make_dataloader(
     train: bool,
 ) -> DataLoader:
     num_workers = int(trainer_cfg["num_workers"])
+    image_size = validate_image_size(int(trainer_cfg["image_size"]))
     dataloader_kwargs = {
         "batch_size": int(trainer_cfg["batch_size"]),
         "shuffle": train,
         "num_workers": num_workers,
-        "collate_fn": CropCollator(processor),
+        "collate_fn": CropCollator(processor, image_size=image_size),
         "pin_memory": bool(trainer_cfg["pin_memory"]),
         "drop_last": train and bool(trainer_cfg["drop_last"]),
     }
@@ -209,6 +219,16 @@ def load_or_create_feature_cache(
                 "linear head特征缓存的backbone_model_name与当前配置不一致，"
                 "请设置feature_cache_rebuild=true后重建。"
             )
+        if "image_size" not in cache:
+            raise ValueError(
+                "linear head特征缓存缺少image_size元数据，"
+                "请设置feature_cache_rebuild=true后重建。"
+            )
+        if int(cache["image_size"]) != int(trainer_cfg["image_size"]):
+            raise ValueError(
+                "linear head特征缓存的image_size与当前配置不一致，"
+                "请设置feature_cache_rebuild=true后重建。"
+            )
         if len(cache["train"]["labels"]) != len(train_df) or len(cache["val"]["labels"]) != len(val_df):
             raise ValueError(
                 "linear head特征缓存样本数与当前train/val切分不一致，"
@@ -246,6 +266,7 @@ def load_or_create_feature_cache(
     cache = {
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
         "backbone_model_name": trainer_cfg["backbone_model_name"],
+        "image_size": int(trainer_cfg["image_size"]),
         "train_sample_count": int(len(train_df)),
         "val_sample_count": int(len(val_df)),
         "train": extract_feature_table(
@@ -783,6 +804,7 @@ def main(config: dict[str, Any] | None = None) -> None:
     dataset_root, metadata, labels = load_tables(config)
     train_df, val_df = split_metadata(metadata=metadata, trainer_cfg=trainer_cfg)
     device = get_torch_device(trainer_cfg["device"])
+    image_size = validate_image_size(int(trainer_cfg["image_size"]))
 
     processor = AutoImageProcessor.from_pretrained(trainer_cfg["backbone_model_name"])
     train_loader = make_dataloader(
@@ -863,6 +885,7 @@ def main(config: dict[str, Any] | None = None) -> None:
             "num_val_samples": int(len(val_df)),
             "num_classes": int(len(labels)),
             "top_k": top_k_values,
+            "image_size": image_size,
         },
     )
 
