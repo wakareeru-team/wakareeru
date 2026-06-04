@@ -229,3 +229,5 @@ data/feature_cache
 data/review
 data/dataset
 data/loss_analysis
+data/trainer_feature_cache
+data/trainer_runs
