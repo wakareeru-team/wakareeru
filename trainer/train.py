@@ -13,7 +13,14 @@ from transformers import AutoImageProcessor
 from pipeline import utils
 from trainer.checkpoint import save_checkpoint, write_json
 from trainer.dataset import CropCollator, CropDataset
-from trainer.eval import build_eval_report, evaluate
+from trainer.eval import (
+    build_eval_report,
+    build_top_k_accuracy,
+    evaluate,
+    make_top_k_correct_counts,
+    update_top_k_correct_counts,
+    validate_top_k_values,
+)
 from trainer.model import BackboneLinearClassifier
 
 logger = utils.get_logger("trainer")
@@ -308,10 +315,12 @@ def train_one_epoch(
     device: torch.device,
     amp_enabled: bool,
     amp_dtype: torch.dtype,
+    top_k_values: list[int],
 ) -> dict[str, float | int]:
     model.train()
     loss_chunks = []
     correct_chunks = []
+    top_k_correct_counts = make_top_k_correct_counts(top_k_values)
     sample_count = 0
     for batch in tqdm(dataloader, desc="train", unit="batch"):
         pixel_values = batch["pixel_values"].to(device, non_blocking=True)
@@ -333,6 +342,11 @@ def train_one_epoch(
         with torch.no_grad():
             preds = logits.argmax(dim=1)
             batch_size = int(labels.numel())
+            update_top_k_correct_counts(
+                counts=top_k_correct_counts,
+                logits=logits,
+                labels=labels,
+            )
             loss_chunks.append(loss.detach() * batch_size)
             correct_chunks.append(preds.eq(labels).sum().detach())
             sample_count += batch_size
@@ -342,6 +356,7 @@ def train_one_epoch(
     return {
         "loss": loss_sum / max(1, sample_count),
         "accuracy": correct_count / max(1, sample_count),
+        **build_top_k_accuracy(counts=top_k_correct_counts, sample_count=sample_count),
         "n": sample_count,
     }
 
@@ -355,10 +370,12 @@ def train_feature_head_one_epoch(
     device: torch.device,
     amp_enabled: bool,
     amp_dtype: torch.dtype,
+    top_k_values: list[int],
 ) -> dict[str, float | int]:
     model.classifier.train()
     loss_chunks = []
     correct_chunks = []
+    top_k_correct_counts = make_top_k_correct_counts(top_k_values)
     sample_count = 0
     for features_cpu, labels_cpu, _sample_indices_cpu in tqdm(dataloader, desc="train features", unit="batch"):
         features = features_cpu.to(device, non_blocking=True)
@@ -378,6 +395,11 @@ def train_feature_head_one_epoch(
         with torch.no_grad():
             preds = logits.argmax(dim=1)
             batch_size = int(labels.numel())
+            update_top_k_correct_counts(
+                counts=top_k_correct_counts,
+                logits=logits,
+                labels=labels,
+            )
             loss_chunks.append(loss.detach() * batch_size)
             correct_chunks.append(preds.eq(labels).sum().detach())
             sample_count += batch_size
@@ -387,6 +409,7 @@ def train_feature_head_one_epoch(
     return {
         "loss": loss_sum / max(1, sample_count),
         "accuracy": correct_count / max(1, sample_count),
+        **build_top_k_accuracy(counts=top_k_correct_counts, sample_count=sample_count),
         "n": sample_count,
     }
 
@@ -401,10 +424,12 @@ def evaluate_feature_head(
     device: torch.device,
     amp_enabled: bool,
     amp_dtype: torch.dtype,
+    top_k_values: list[int],
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     model.classifier.eval()
     records = []
     image_paths = feature_table["image_paths"]
+    top_k_correct_counts = make_top_k_correct_counts(top_k_values)
     for features_cpu, labels_cpu, sample_indices_cpu in tqdm(dataloader, desc="eval features", unit="batch"):
         features = features_cpu.to(device, non_blocking=True)
         y_true = labels_cpu.to(device, non_blocking=True)
@@ -416,6 +441,11 @@ def evaluate_feature_head(
             logits = model.classifier(features)
         if not torch.isfinite(logits).all():
             raise FloatingPointError("feature linear head验证中出现非有限logits，请重建特征缓存或降低学习率。")
+        update_top_k_correct_counts(
+            counts=top_k_correct_counts,
+            logits=logits,
+            labels=y_true,
+        )
         probs = torch.softmax(logits, dim=1)
         confidence, y_pred = probs.max(dim=1)
         for i, sample_index in enumerate(sample_indices_cpu.tolist()):
@@ -430,7 +460,17 @@ def evaluate_feature_head(
                 }
             )
     predictions = pd.DataFrame(records)
-    return build_eval_report(predictions=predictions, labels=labels), predictions
+    return (
+        build_eval_report(
+            predictions=predictions,
+            labels=labels,
+            top_k_accuracy=build_top_k_accuracy(
+                counts=top_k_correct_counts,
+                sample_count=len(predictions),
+            ),
+        ),
+        predictions,
+    )
 
 
 def is_metric_improved(
@@ -530,6 +570,7 @@ def run_phase(
     labels_payload: list[dict[str, Any]],
     epoch_rows: list[dict[str, Any]],
     global_epoch_start: int,
+    top_k_values: list[int],
 ) -> tuple[int, dict[str, Any]]:
     prepare_phase(model, phase_cfg)
     model.to(device)
@@ -602,6 +643,7 @@ def run_phase(
                 device=device,
                 amp_enabled=False,
                 amp_dtype=amp_dtype,
+                top_k_values=top_k_values,
             )
             eval_report, predictions = evaluate_feature_head(
                 model=model,
@@ -611,6 +653,7 @@ def run_phase(
                 device=device,
                 amp_enabled=False,
                 amp_dtype=amp_dtype,
+                top_k_values=top_k_values,
             )
         else:
             train_metrics = train_one_epoch(
@@ -621,12 +664,14 @@ def run_phase(
                 device=device,
                 amp_enabled=amp_enabled,
                 amp_dtype=amp_dtype,
+                top_k_values=top_k_values,
             )
             eval_report, predictions = evaluate(
                 model=model,
                 dataloader=val_loader,
                 labels=labels,
                 device=device,
+                top_k_values=top_k_values,
             )
         epoch_row = {
             "phase": phase_name,
@@ -640,6 +685,10 @@ def run_phase(
             "train_n": train_metrics["n"],
             "val_n": eval_report["num_samples"],
         }
+        for top_k in top_k_values:
+            metric_name = f"top_{top_k}_accuracy"
+            epoch_row[f"train_{metric_name}"] = train_metrics[metric_name]
+            epoch_row[f"val_{metric_name}"] = eval_report["top_k_accuracy"][metric_name]
         if early_stopping_monitor not in epoch_row:
             raise ValueError(f"early stopping监控指标不存在: {early_stopping_monitor!r}")
         epoch_rows.append(epoch_row)
@@ -683,12 +732,16 @@ def run_phase(
             epochs_without_improvement += 1
         completed_epochs += 1
         logger.info(
-            "phase=%s epoch=%d train_loss=%.4f train_acc=%.4f val_acc=%.4f val_macro_f1=%.4f best_%s=%.4f stale_epochs=%d",
+            "phase=%s epoch=%d train_loss=%.4f train_acc=%.4f val_acc=%.4f val_top_k=%s val_macro_f1=%.4f best_%s=%.4f stale_epochs=%d",
             phase_name,
             phase_epoch,
             float(train_metrics["loss"]),
             float(train_metrics["accuracy"]),
             float(eval_report["accuracy"]),
+            ", ".join(
+                f"top_{top_k}={float(eval_report['top_k_accuracy'][f'top_{top_k}_accuracy']):.4f}"
+                for top_k in top_k_values
+            ),
             float(eval_report["macro_f1"]),
             early_stopping_monitor,
             float(best_score) if best_score is not None else float("nan"),
@@ -752,6 +805,10 @@ def main(config: dict[str, Any] | None = None) -> None:
         num_classes=int(labels["label_id"].astype(int).max()) + 1,
         freeze_backbone=bool(trainer_cfg["freeze_backbone"]),
     ).to(device)
+    top_k_values = validate_top_k_values(
+        top_k_values=list(trainer_cfg["top_k"]),
+        num_classes=int(labels["label_id"].astype(int).max()) + 1,
+    )
 
     criterion = nn.CrossEntropyLoss()
     run_dir = utils.join_data_root(trainer_cfg["output_dir"], config=config) / time.strftime(
@@ -791,6 +848,7 @@ def main(config: dict[str, Any] | None = None) -> None:
             labels_payload=labels_payload,
             epoch_rows=epoch_rows,
             global_epoch_start=global_epoch,
+            top_k_values=top_k_values,
         )
         global_epoch += completed_epochs
         phase_summaries.append(phase_summary)
@@ -804,6 +862,7 @@ def main(config: dict[str, Any] | None = None) -> None:
             "num_train_samples": int(len(train_df)),
             "num_val_samples": int(len(val_df)),
             "num_classes": int(len(labels)),
+            "top_k": top_k_values,
         },
     )
 
