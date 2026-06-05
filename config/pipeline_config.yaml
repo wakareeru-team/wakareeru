@@ -148,7 +148,7 @@ logistic_regression_filter:
   clean_label: "ok"
   test_ratio: 0.2
   fold_num: 4
-  minimum_clean_recall: 0.93
+  minimum_clean_recall: 0.94
   lr_C: 1.0
   solver: "lbfgs"
   class_weight: "balanced"
