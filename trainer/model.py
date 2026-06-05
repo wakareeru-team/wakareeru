@@ -7,6 +7,8 @@ from transformers import AutoModel
 class BackboneLinearClassifier(nn.Module):
     """Backbone plus a linear classification head."""
 
+    feature_pooling = "cls_patch_mean"
+
     def __init__(
         self,
         *,
@@ -16,8 +18,8 @@ class BackboneLinearClassifier(nn.Module):
     ) -> None:
         super().__init__()
         self.backbone = AutoModel.from_pretrained(backbone_model_name)
-        hidden_size = int(self.backbone.config.hidden_size)
-        self.classifier = nn.Linear(hidden_size, num_classes)
+        self.feature_dim = int(self.backbone.config.hidden_size) * 2
+        self.classifier = nn.Linear(self.feature_dim, num_classes)
         self.backbone_frozen = False
         self.lora_enabled = False
         if freeze_backbone:
@@ -96,6 +98,19 @@ class BackboneLinearClassifier(nn.Module):
                 outputs = self.backbone(pixel_values=pixel_values)
         else:
             outputs = self.backbone(pixel_values=pixel_values)
-        if getattr(outputs, "pooler_output", None) is not None:
-            return outputs.pooler_output
-        return outputs.last_hidden_state[:, 0]
+
+        last_hidden_state = outputs.last_hidden_state
+        cls_features = getattr(outputs, "pooler_output", None)
+        if cls_features is None:
+            cls_features = last_hidden_state[:, 0]
+
+        num_register_tokens = int(getattr(self.backbone.config, "num_register_tokens", 0))
+        patch_token_start = 1 + num_register_tokens
+        if last_hidden_state.shape[1] <= patch_token_start:
+            raise ValueError(
+                "Backbone output does not contain patch tokens after CLS and register tokens: "
+                f"sequence_length={last_hidden_state.shape[1]}, "
+                f"num_register_tokens={num_register_tokens}"
+            )
+        patch_mean_features = last_hidden_state[:, patch_token_start:].mean(dim=1)
+        return torch.cat((cls_features, patch_mean_features), dim=-1)

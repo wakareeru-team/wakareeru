@@ -219,6 +219,16 @@ def load_or_create_feature_cache(
                 "linear head特征缓存的backbone_model_name与当前配置不一致，"
                 "请设置feature_cache_rebuild=true后重建。"
             )
+        if cache.get("feature_pooling") != model.feature_pooling:
+            raise ValueError(
+                "linear head特征缓存的feature_pooling与当前模型不一致，"
+                "请设置feature_cache_rebuild=true后重建。"
+            )
+        if int(cache.get("feature_dim", -1)) != model.feature_dim:
+            raise ValueError(
+                "linear head特征缓存的feature_dim与当前模型不一致，"
+                "请设置feature_cache_rebuild=true后重建。"
+            )
         if "image_size" not in cache:
             raise ValueError(
                 "linear head特征缓存缺少image_size元数据，"
@@ -266,6 +276,8 @@ def load_or_create_feature_cache(
     cache = {
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
         "backbone_model_name": trainer_cfg["backbone_model_name"],
+        "feature_pooling": model.feature_pooling,
+        "feature_dim": model.feature_dim,
         "image_size": int(trainer_cfg["image_size"]),
         "train_sample_count": int(len(train_df)),
         "val_sample_count": int(len(val_df)),
@@ -291,9 +303,16 @@ def load_or_create_feature_cache(
 
 
 def validate_feature_cache(cache: dict[str, Any]) -> None:
+    feature_dim = int(cache["feature_dim"])
     for split in ("train", "val"):
         features = cache[split]["features"]
         labels = cache[split]["labels"]
+        if features.ndim != 2 or features.shape[1] != feature_dim:
+            raise ValueError(
+                f"linear head特征缓存维度错误: split={split}, "
+                f"shape={tuple(features.shape)}, feature_dim={feature_dim}。"
+                "请删除缓存或设置feature_cache_rebuild=true后重建。"
+            )
         if not torch.isfinite(features).all():
             nan_count = int(torch.isnan(features).sum().item())
             inf_count = int(torch.isinf(features).sum().item())
