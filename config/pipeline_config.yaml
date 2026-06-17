@@ -100,6 +100,7 @@ noise_detection:
   # 选项: "series" | "fine_grained_series" | "submodel"
   label_granularity: "fine_grained_series"
   hf_model_name: "facebook/dinov3-vits16-pretrain-lvd1689m"
+  image_size: 384
   full_series: true
   series_test_scope: ["E231系", "キハ40系", "EF510形", "DD51形", "C57形", "キハ141系","E233系", "E353系", "E657系", "E5系", "E6系", "EF64形", "E7系",'EF81形','E235系','キハ110系',
         '113系','485系','E217系','E257系']
@@ -147,7 +148,7 @@ logistic_regression_filter:
   clean_label: "ok"
   test_ratio: 0.2
   fold_num: 4
-  minimum_clean_recall: 0.93
+  minimum_clean_recall: 0.94
   lr_C: 1.0
   solver: "lbfgs"
   class_weight: "balanced"
@@ -184,4 +185,54 @@ crops_storage:
   metadata_columns: ["image_path", "label_id", "label", "label_en", "manual_reviewed", "series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
   jpeg_quality: 95
 
+trainer:
+  backbone_model_name: "facebook/dinov3-vits16-pretrain-lvd1689m"
+  image_size: 384
+  freeze_backbone: true
+  metadata_file_name: "metadata.csv"
+  labels_file_name: "labels.csv"
+  output_dir: "trainer_runs"
+  image_path_column: "image_path"
+  label_id_column: "label_id"
+  batch_size: 32
+  num_workers: 12
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  drop_last: true
+  amp_enabled: true
+  amp_dtype: "bfloat16"
+  val_ratio: 0.2
+  stratify_split: true
+  top_k: [1, 3, 5]
+  seed: 42
+  device: "auto"
+  checkpoint_prefix: "linear_head"
+  latest_run_pointer: "latest_trainer_run.txt"
+  epoch_report_file_name: "epoch_report.csv"
+  eval_report_file_name: "eval_report.json"
+  prediction_file_name: "val_predictions.csv"
+  feature_cache_dir: "trainer_feature_cache"
+  phases:
+    - name: "linear_head_alpha"
+      train_mode: "linear_head"
+      epochs: 30
+      use_feature_cache: true
+      feature_cache_file_name: "linear_head_alpha_features.pt"
+      feature_cache_rebuild: false
+      feature_cache_amp_enabled: false
+      learning_rate: 1e-3
+      weight_decay: 1e-4
+      early_stopping_enabled: true
+      early_stopping_monitor: "val_macro_f1"
+      early_stopping_mode: "max" # larger is better
+      early_stopping_patience: 3
+      early_stopping_min_delta: 0.0
+  export:
+    # "latest_best" / "latest" = trainer.latest_run_pointer指向的最新run中最后一个phase的best checkpoint。
+    # 也可以填写相对path.data_root的具体checkpoint路径。
+    checkpoint_path: "latest_best"
+    output_dir: "model/wakareeru-0.1.0-alpha.1"
+    artifact_version: "0.1.0-alpha.1"
+    force: false
   

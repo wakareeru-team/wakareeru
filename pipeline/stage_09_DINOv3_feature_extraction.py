@@ -201,12 +201,26 @@ class CropImageDataset(torch.utils.data.Dataset):
 
 
 class FeatureCollator:
-    def __init__(self, processor):
+    def __init__(self, processor, image_size: int):
         self.processor = processor
+        self.image_size = int(image_size)
 
     def __call__(self, batch):
         images, metas = zip(*batch)
-        image_tensors = self.processor(images=list(images), return_tensors="pt")["pixel_values"]
+        processor_kwargs = {
+            "images": list(images),
+            "return_tensors": "pt",
+            "size": {
+                "height": self.image_size,
+                "width": self.image_size,
+            },
+        }
+        if getattr(self.processor, "crop_size", None) is not None:
+            processor_kwargs["crop_size"] = {
+                "height": self.image_size,
+                "width": self.image_size,
+            }
+        image_tensors = self.processor(**processor_kwargs)["pixel_values"]
         crop_ids = torch.tensor([int(meta["crop_id"]) for meta in metas], dtype=torch.long)
         return image_tensors, crop_ids
 
@@ -256,6 +270,10 @@ def main(config=None):
     
     
     batch_size = noise_detection_cfg["feature_extraction_batch_size"]
+    image_size = utils.validate_vit_image_size(
+        noise_detection_cfg["image_size"],
+        "noise_detection.image_size",
+    )
     shard_size = int(noise_detection_cfg["feature_cache_shard_size"])
     if shard_size <= 0:
         raise ValueError("noise_detection.feature_cache_shard_size must be > 0")
@@ -268,7 +286,7 @@ def main(config=None):
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=FeatureCollator(processor),
+        collate_fn=FeatureCollator(processor, image_size=image_size),
         num_workers=noise_detection_cfg["extration_workers"],
     )
     
@@ -329,6 +347,7 @@ def main(config=None):
         tensor_keys=["features", "crop_ids"],
         metadata={
             "model_name": pretrained_model_name,
+            "image_size": image_size,
             "shard_dir": str(shard_dir),
             "crop_pad_frac": noise_detection_cfg["crop_pad_frac"],
             "feature_schema_version": 2,

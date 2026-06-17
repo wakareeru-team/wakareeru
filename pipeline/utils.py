@@ -124,6 +124,19 @@ def get_loss_round_dir(config: dict, active_round: str, pointer: str | None = No
 
 
 # ================ Image Processing Utils ================
+def validate_vit_image_size(image_size: int, config_key: str) -> int:
+    image_size = int(image_size)
+    if image_size < 1:
+        raise ValueError(f"{config_key} must be a positive integer")
+    if image_size % 16 != 0:
+        get_logger("utils").warning(
+            "%s=%d is not divisible by 16; ViT patch input may need extra interpolation or truncation.",
+            config_key,
+            image_size,
+        )
+    return image_size
+
+
 def load_img_with_orientation(path):
     
 

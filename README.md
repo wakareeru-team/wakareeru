@@ -63,9 +63,13 @@ data/
   feature_cache/
   review/
 tools/                     # 人工 review 等交互式辅助工具
+trainer/                   # crop 图像训练与推理 artifact 导出
+model_core/                # 训练与推理共享的分类模型、loader 和 crop 分类逻辑
 src/crawler/               # 探索性 notebook 与实验流程
 docs/                      # 项目过程记录
 ```
+
+平级仓库 `wakareeru-inference` 是 serverless 推理后端。它通过 Git dependency 复用本仓库的 `model_core`，并从本地 `models/` 读取本仓库导出的分类模型 artifact。
 
 ## 快速开始
 
@@ -156,6 +160,20 @@ python tools/noise_review_gradio.py
 ```bash
 python tools/loss_round_spotcheck_gradio.py
 ```
+
+训练 crop 图像线性头：
+
+```bash
+python -m trainer.train
+```
+
+导出供 `wakareeru-inference` 使用的自包含分类模型 artifact：
+
+```bash
+python -m trainer.export_inference_model
+```
+
+导出路径由 `config/pipeline_config.yaml` 的 `trainer.export` 控制。训练完成后会在 `trainer.output_dir` 下更新 `trainer.latest_run_pointer`；`trainer.export.checkpoint_path: "latest_best"` 会导出最新训练 run 最后一个 phase 的 best checkpoint，也可以填具体 checkpoint 路径。分类 artifact 包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json` 和 `manifest.json`；`model_config.json` 的 `image_size` 来自 checkpoint 保存的训练配置，导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以该 artifact 配置为准。
 
 导出/导入人工复核 CSV（路径相对 `path.data_root` 解析，使用 stable key + bbox IoU 匹配）：
 
