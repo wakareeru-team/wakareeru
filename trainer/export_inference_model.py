@@ -8,12 +8,10 @@ import torch
 from safetensors.torch import save_file
 from transformers import AutoImageProcessor, AutoModel
 
-from model_core.model import BackboneLinearClassifier
+from model_core.model import ARCHITECTURE, ARCHITECTURE_VERSION, BackboneLinearClassifier
 from pipeline import utils
 
 
-ARCHITECTURE = "backbone_linear_classifier"
-ARCHITECTURE_VERSION = 1
 BACKBONE_DIR_NAME = "backbone"
 PROCESSOR_DIR_NAME = "processor"
 LATEST_BEST_CHECKPOINT_ALIASES = {"latest", "latest_best"}

@@ -3,6 +3,10 @@ from torch import nn
 from transformers import AutoModel
 
 
+ARCHITECTURE = "backbone_linear_classifier"
+ARCHITECTURE_VERSION = 1
+
+
 class BackboneLinearClassifier(nn.Module):
     """Backbone plus a linear classification head."""
 

@@ -7,7 +7,7 @@ import torch
 from safetensors.torch import load_file
 from transformers import AutoImageProcessor, AutoModel
 
-from model_core.model import BackboneLinearClassifier
+from model_core.model import ARCHITECTURE, ARCHITECTURE_VERSION, BackboneLinearClassifier
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,19 @@ def build_id_to_label(labels: list[dict[str, Any]]) -> dict[int, str]:
         int(row["label_id"]): str(row["label"])
         for row in labels
     }
+
+
+def validate_model_architecture(model_config: dict[str, Any]) -> None:
+    architecture = model_config.get("architecture")
+    architecture_version = model_config.get("architecture_version")
+    if architecture_version is None:
+        raise ValueError("model_config.json is missing architecture_version")
+    if architecture != ARCHITECTURE or int(architecture_version) != ARCHITECTURE_VERSION:
+        raise ValueError(
+            "Unsupported model architecture: "
+            f"architecture={architecture!r}, version={architecture_version!r}; "
+            f"supported architecture={ARCHITECTURE!r}, version={ARCHITECTURE_VERSION}"
+        )
 
 
 def resolve_backbone_path(model_dir: Path, model_config: dict[str, Any]) -> Path:
@@ -65,6 +78,7 @@ def load_classifier(
     model_dir = Path(model_dir)
     require_dir(model_dir, "Model directory")
     model_config = read_json(model_dir / "model_config.json")
+    validate_model_architecture(model_config)
     labels = read_json(model_dir / "labels.json")
     backbone_path = resolve_backbone_path(model_dir, model_config)
     processor_path = require_dir(model_dir / "processor", "Processor directory")
