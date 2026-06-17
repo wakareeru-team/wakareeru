@@ -8,8 +8,8 @@ import torch
 from safetensors.torch import save_file
 from transformers import AutoImageProcessor
 
+from model_core.model import BackboneLinearClassifier
 from pipeline import utils
-from trainer.model import BackboneLinearClassifier
 
 
 ARCHITECTURE = "backbone_linear_classifier"

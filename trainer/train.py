@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm.auto import tqdm
 from transformers import AutoImageProcessor
 
+from model_core.model import BackboneLinearClassifier
 from pipeline import utils
 from trainer.checkpoint import save_checkpoint, write_json
 from trainer.dataset import CropCollator, CropDataset
@@ -21,7 +22,6 @@ from trainer.eval import (
     update_top_k_correct_counts,
     validate_top_k_values,
 )
-from trainer.model import BackboneLinearClassifier
 
 logger = utils.get_logger("trainer")
 

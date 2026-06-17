@@ -228,7 +228,7 @@ trainer:
       early_stopping_patience: 3
       early_stopping_min_delta: 0.0
   export:
-    checkpoint_path: "trainer_runs/CHANGE_ME/linear_head_linear_head_alpha_best.pt"
+    checkpoint_path: "trainer_runs/20260617_150643/linear_head_linear_head_alpha_epoch009.pt"
     output_dir: "model/wakareeru-0.1.0-alpha.1"
     artifact_version: 0.1.0-alpha.1"
     force: false
