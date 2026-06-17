@@ -173,7 +173,7 @@ python -m trainer.train
 python -m trainer.export_inference_model
 ```
 
-导出路径由 `config/pipeline_config.yaml` 的 `trainer.export` 控制。分类 artifact 包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json` 和 `manifest.json`；`model_config.json` 的 `image_size` 来自 checkpoint 保存的训练配置，导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以该 artifact 配置为准。
+导出路径由 `config/pipeline_config.yaml` 的 `trainer.export` 控制。训练完成后会在 `trainer.output_dir` 下更新 `trainer.latest_run_pointer`；`trainer.export.checkpoint_path: "latest_best"` 会导出最新训练 run 最后一个 phase 的 best checkpoint，也可以填具体 checkpoint 路径。分类 artifact 包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json` 和 `manifest.json`；`model_config.json` 的 `image_size` 来自 checkpoint 保存的训练配置，导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以该 artifact 配置为准。
 
 导出/导入人工复核 CSV（路径相对 `path.data_root` 解析，使用 stable key + bbox IoU 匹配）：
 

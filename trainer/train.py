@@ -158,6 +158,12 @@ def make_feature_cache_path(
     return feature_cache_dir / feature_cache_file_name
 
 
+def update_latest_trainer_run_pointer(*, run_dir: Path, trainer_cfg: dict[str, Any]) -> None:
+    pointer_path = run_dir.parent / trainer_cfg["latest_run_pointer"]
+    pointer_path.write_text(run_dir.name + "\n", encoding="utf-8")
+    logger.info("已更新最新trainer run指针: %s -> %s", pointer_path, run_dir.name)
+
+
 def refresh_feature_cache_labels(
     *,
     cache: dict[str, Any],
@@ -902,19 +908,18 @@ def main(config: dict[str, Any] | None = None) -> None:
         global_epoch += completed_epochs
         phase_summaries.append(phase_summary)
 
-    write_json(
-        run_dir / "run_summary.json",
-        {
-            "run_dir": str(run_dir),
-            "phase_summaries": phase_summaries,
-            "total_completed_epochs": global_epoch,
-            "num_train_samples": int(len(train_df)),
-            "num_val_samples": int(len(val_df)),
-            "num_classes": int(len(labels)),
-            "top_k": top_k_values,
-            "image_size": image_size,
-        },
-    )
+    run_summary = {
+        "run_dir": str(run_dir),
+        "phase_summaries": phase_summaries,
+        "total_completed_epochs": global_epoch,
+        "num_train_samples": int(len(train_df)),
+        "num_val_samples": int(len(val_df)),
+        "num_classes": int(len(labels)),
+        "top_k": top_k_values,
+        "image_size": image_size,
+    }
+    write_json(run_dir / "run_summary.json", run_summary)
+    update_latest_trainer_run_pointer(run_dir=run_dir, trainer_cfg=trainer_cfg)
 
 
 if __name__ == "__main__":

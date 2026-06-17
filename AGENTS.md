@@ -128,7 +128,7 @@ python -m trainer.train
 python -m trainer.export_inference_model
 ```
 
-导出配置位于 `trainer.export`。导出的分类模型目录是自包含 artifact，应包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json` 和 `manifest.json`。`model_config.json` 中的 `image_size` 来自 checkpoint 保存的训练配置；导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以 `model_config.json` 为准，避免训练与推理 resize/crop 尺寸错位。
+导出配置位于 `trainer.export`。训练完成后会在 `trainer.output_dir` 下更新 `trainer.latest_run_pointer` 指针；`trainer.export.checkpoint_path: "latest_best"` 会导出最新训练 run 最后一个 phase 的 best checkpoint，也可以填具体 checkpoint 路径。导出的分类模型目录是自包含 artifact，应包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json` 和 `manifest.json`。`model_config.json` 中的 `image_size` 来自 checkpoint 保存的训练配置；导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以 `model_config.json` 为准，避免训练与推理 resize/crop 尺寸错位。
 
 从人工复核 CSV 导入 review overlay（路径相对 `path.data_root` 解析，用 stable key + bbox IoU 匹配，不依赖自增 id）：
 
@@ -217,7 +217,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`image_size` 控制特征提取阶段输入 processor 的正方形 resize/crop 分辨率，修改后需要重跑 `feature_extraction`；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。`loss_tracking` 会按 `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 过滤人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。详细设计见 `docs/noise_review_loop.md`。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。`manual_correction_invalidate_metadata_columns` 控制人工纠正标签后需要清空的原图分类路径派生 metadata；随后 `manual_correction_refill_operator_columns` 中的 operator 字段只有同 label 唯一非空值时补齐，`manual_correction_refill_submodel_bandai_columns` 作为一对只有唯一非空组合时才一起补齐。
-- `trainer.*` 控制 crop 图像训练入口；`trainer.image_size` 控制输入 processor 的正方形 resize/crop 分辨率，并写入 checkpoint。导出推理 artifact 时，`model_config.json` 与 `processor/preprocessor_config.json` 会使用 checkpoint 中保存的 `image_size`，而不是当前工作区后来改动的配置。修改 `trainer.image_size`、backbone、pooling 方式或特征维度后需要重建 linear head feature cache；加载已有 feature cache 时会用当前 metadata 的 label id 刷新 cache 内 labels，避免 metadata/labels 重新生成后沿用旧 label id。分类特征由 CLS 与排除 register tokens 后的 patch mean 拼接而成；当前默认冻结 `backbone_model_name` 并只训练线性分类头，报告和 checkpoint 写入 `trainer.output_dir`。
+- `trainer.*` 控制 crop 图像训练入口；`trainer.image_size` 控制输入 processor 的正方形 resize/crop 分辨率，并写入 checkpoint。训练结束后 `trainer.latest_run_pointer` 指向最新 run 目录，`run_summary.json` 记录每个 phase 的 best checkpoint；`trainer.export.checkpoint_path` 可用 `"latest_best"` 指向最新 run 的 best checkpoint。导出推理 artifact 时，`model_config.json` 与 `processor/preprocessor_config.json` 会使用 checkpoint 中保存的 `image_size`，而不是当前工作区后来改动的配置。修改 `trainer.image_size`、backbone、pooling 方式或特征维度后需要重建 linear head feature cache；加载已有 feature cache 时会用当前 metadata 的 label id 刷新 cache 内 labels，避免 metadata/labels 重新生成后沿用旧 label id。分类特征由 CLS 与排除 register tokens 后的 patch mean 拼接而成；当前默认冻结 `backbone_model_name` 并只训练线性分类头，报告和 checkpoint 写入 `trainer.output_dir`。
 
 ## 维护边界
 

@@ -16,6 +16,7 @@ ARCHITECTURE = "backbone_linear_classifier"
 ARCHITECTURE_VERSION = 1
 BACKBONE_DIR_NAME = "backbone"
 PROCESSOR_DIR_NAME = "processor"
+LATEST_BEST_CHECKPOINT_ALIASES = {"latest", "latest_best"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,6 +41,51 @@ def load_checkpoint(checkpoint_path: Path) -> dict[str, Any]:
     if missing_keys:
         raise ValueError(f"Checkpoint is missing required keys: {sorted(missing_keys)}")
     return checkpoint
+
+
+def resolve_latest_run_dir(config: dict[str, Any], trainer_cfg: dict[str, Any]) -> Path:
+    run_root = utils.join_data_root(trainer_cfg["output_dir"], config=config)
+    pointer_path = run_root / trainer_cfg["latest_run_pointer"]
+    if not pointer_path.is_file():
+        raise FileNotFoundError(f"Latest trainer run pointer not found: {pointer_path}")
+    run_name = pointer_path.read_text(encoding="utf-8").strip()
+    if not run_name:
+        raise ValueError(f"Latest trainer run pointer is empty: {pointer_path}")
+    run_dir = run_root / run_name
+    if not run_dir.is_dir():
+        raise FileNotFoundError(f"Latest trainer run directory not found: {run_dir}")
+    return run_dir
+
+
+def resolve_latest_best_checkpoint(config: dict[str, Any], trainer_cfg: dict[str, Any]) -> Path:
+    run_dir = resolve_latest_run_dir(config, trainer_cfg)
+    summary_path = run_dir / "run_summary.json"
+    if not summary_path.is_file():
+        raise FileNotFoundError(f"Trainer run summary not found: {summary_path}")
+    run_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    phase_summaries = run_summary.get("phase_summaries")
+    if not isinstance(phase_summaries, list) or not phase_summaries:
+        raise ValueError(f"Trainer run summary has no phase_summaries: {summary_path}")
+    best_checkpoint = phase_summaries[-1].get("best_checkpoint_path")
+    if not best_checkpoint:
+        raise ValueError(f"Latest trainer run has no best checkpoint: {summary_path}")
+    best_checkpoint_path = Path(str(best_checkpoint)).expanduser()
+    if not best_checkpoint_path.is_absolute():
+        best_checkpoint_path = utils.join_data_root(best_checkpoint_path, config=config)
+    if not best_checkpoint_path.is_file():
+        raise FileNotFoundError(f"Best checkpoint not found: {best_checkpoint_path}")
+    return best_checkpoint_path
+
+
+def resolve_export_checkpoint_path(config: dict[str, Any], export_cfg: dict[str, Any]) -> Path:
+    checkpoint_path = str(export_cfg["checkpoint_path"])
+    trainer_cfg = config["trainer"]
+    if checkpoint_path in LATEST_BEST_CHECKPOINT_ALIASES:
+        return resolve_latest_best_checkpoint(config, trainer_cfg)
+    resolved_path = utils.join_data_root(checkpoint_path, config=config)
+    if not resolved_path.is_file():
+        raise FileNotFoundError(f"Checkpoint not found: {resolved_path}")
+    return resolved_path
 
 
 def build_model_config(
@@ -175,7 +221,7 @@ def export_inference_model(
 
 def export_inference_model_from_config(config: dict[str, Any]) -> None:
     export_cfg = config["trainer"]["export"]
-    checkpoint_path = utils.join_data_root(export_cfg["checkpoint_path"], config=config)
+    checkpoint_path = resolve_export_checkpoint_path(config, export_cfg)
     output_dir = utils.join_data_root(export_cfg["output_dir"], config=config)
     export_inference_model(
         checkpoint_path=checkpoint_path,

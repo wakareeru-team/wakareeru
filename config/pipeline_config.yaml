@@ -208,6 +208,7 @@ trainer:
   seed: 42
   device: "auto"
   checkpoint_prefix: "linear_head"
+  latest_run_pointer: "latest_trainer_run.txt"
   epoch_report_file_name: "epoch_report.csv"
   eval_report_file_name: "eval_report.json"
   prediction_file_name: "val_predictions.csv"
@@ -228,7 +229,9 @@ trainer:
       early_stopping_patience: 3
       early_stopping_min_delta: 0.0
   export:
-    checkpoint_path: "trainer_runs/20260617_150643/linear_head_linear_head_alpha_epoch009.pt"
+    # "latest_best" / "latest" = trainer.latest_run_pointer指向的最新run中最后一个phase的best checkpoint。
+    # 也可以填写相对path.data_root的具体checkpoint路径。
+    checkpoint_path: "latest_best"
     output_dir: "model/wakareeru-0.1.0-alpha.1"
     artifact_version: "0.1.0-alpha.1"
     force: false
