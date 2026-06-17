@@ -18,7 +18,7 @@ ARCHITECTURE_VERSION = 1
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export a non-LoRA trainer checkpoint as an inference model bundle.",
+        description="Export a linear-head trainer checkpoint as an inference model bundle.",
     )
     parser.add_argument(
         "--config",
@@ -38,16 +38,6 @@ def load_checkpoint(checkpoint_path: Path) -> dict[str, Any]:
     if missing_keys:
         raise ValueError(f"Checkpoint is missing required keys: {sorted(missing_keys)}")
     return checkpoint
-
-
-def validate_non_lora_checkpoint(state_dict: dict[str, torch.Tensor]) -> None:
-    lora_keys = [key for key in state_dict if "lora_" in key]
-    if lora_keys:
-        preview = ", ".join(lora_keys[:5])
-        raise ValueError(
-            "This export script only supports non-LoRA alpha checkpoints. "
-            f"Found LoRA weights: {preview}"
-        )
 
 
 def build_model_config(
@@ -77,9 +67,6 @@ def build_model_config(
         "classifier": {
             "type": "linear",
             "feature_dim": int(classifier_weight.shape[1]),
-        },
-        "peft": {
-            "enabled": False,
         },
     }
 
@@ -115,7 +102,6 @@ def export_inference_model(
 
     checkpoint = load_checkpoint(checkpoint_path)
     state_dict = checkpoint["model_state_dict"]
-    validate_non_lora_checkpoint(state_dict)
     classifier_state = extract_classifier_state(state_dict)
     model_config = build_model_config(
         checkpoint=checkpoint,

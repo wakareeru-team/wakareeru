@@ -542,16 +542,7 @@ def prepare_phase(model: BackboneLinearClassifier, phase_cfg: dict[str, Any]) ->
     if train_mode == "linear_head":
         model.train_linear_head_only()
         return
-    if train_mode == "lora":
-        model.enable_lora(
-            r=int(phase_cfg["lora_r"]),
-            alpha=int(phase_cfg["lora_alpha"]),
-            dropout=float(phase_cfg["lora_dropout"]),
-            bias=str(phase_cfg["lora_bias"]),
-        )
-        model.train_lora_and_head()
-        return
-    raise ValueError("trainer.phases[].train_mode必须是linear_head或lora")
+    raise ValueError("trainer.phases[].train_mode必须是linear_head")
 
 
 def make_phase_optimizer(
@@ -565,27 +556,6 @@ def make_phase_optimizer(
         return torch.optim.AdamW(
             model.classifier.parameters(),
             lr=float(phase_cfg["learning_rate"]),
-            weight_decay=weight_decay,
-        )
-    if train_mode == "lora":
-        lora_parameters = [
-            parameter
-            for name, parameter in model.backbone.named_parameters()
-            if parameter.requires_grad and "lora_" in name
-        ]
-        if not lora_parameters:
-            raise ValueError("LoRA phase没有可训练的LoRA参数")
-        return torch.optim.AdamW(
-            [
-                {
-                    "params": model.classifier.parameters(),
-                    "lr": float(phase_cfg["head_learning_rate"]),
-                },
-                {
-                    "params": lora_parameters,
-                    "lr": float(phase_cfg["lora_learning_rate"]),
-                },
-            ],
             weight_decay=weight_decay,
         )
     raise ValueError(f"未知训练模式: {train_mode!r}")
