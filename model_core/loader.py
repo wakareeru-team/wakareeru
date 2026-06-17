@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 from safetensors.torch import load_file
-from transformers import AutoImageProcessor
+from transformers import AutoImageProcessor, AutoModel
 
 from model_core.model import BackboneLinearClassifier
 
@@ -69,12 +69,15 @@ def load_classifier(
     backbone_path = resolve_backbone_path(model_dir, model_config)
     processor_path = require_dir(model_dir / "processor", "Processor directory")
     classifier_path = require_file(model_dir / "classifier.safetensors", "Classifier weights")
+    backbone = AutoModel.from_pretrained(
+        backbone_path,
+        local_files_only=True,
+    )
 
     model = BackboneLinearClassifier(
-        backbone_model_name=str(backbone_path),
+        backbone=backbone,
         num_classes=int(model_config["num_classes"]),
         freeze_backbone=True,
-        local_files_only=True,
     )
     classifier_state = load_file(classifier_path)
     model.classifier.load_state_dict(classifier_state)

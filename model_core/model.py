@@ -11,16 +11,21 @@ class BackboneLinearClassifier(nn.Module):
     def __init__(
         self,
         *,
-        backbone_model_name: str,
+        backbone_model_name: str | None = None,
+        backbone: nn.Module | None = None,
         num_classes: int,
         freeze_backbone: bool,
         local_files_only: bool = False,
     ) -> None:
         super().__init__()
-        self.backbone = AutoModel.from_pretrained(
-            backbone_model_name,
-            local_files_only=local_files_only,
-        )
+        if backbone is None:
+            if backbone_model_name is None:
+                raise ValueError("Either backbone_model_name or backbone must be provided")
+            backbone = AutoModel.from_pretrained(
+                backbone_model_name,
+                local_files_only=local_files_only,
+            )
+        self.backbone = backbone
         self.feature_dim = int(self.backbone.config.hidden_size) * 2
         self.classifier = nn.Linear(self.feature_dim, num_classes)
         self.backbone_frozen = False
