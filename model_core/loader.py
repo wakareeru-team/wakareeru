@@ -30,6 +30,18 @@ def build_id_to_label(labels: list[dict[str, Any]]) -> dict[int, str]:
     }
 
 
+def resolve_backbone_path(model_dir: Path, model_config: dict[str, Any]) -> Path:
+    backbone_config = model_config.get("backbone")
+    if not isinstance(backbone_config, dict) or not backbone_config.get("path"):
+        raise ValueError("model_config.json is missing backbone.path")
+    backbone_path = Path(str(backbone_config["path"]))
+    if not backbone_path.is_absolute():
+        backbone_path = model_dir / backbone_path
+    if not backbone_path.exists():
+        raise FileNotFoundError(f"Backbone directory not found: {backbone_path}")
+    return backbone_path
+
+
 def load_classifier(
     model_dir: str | Path,
     *,
@@ -39,9 +51,10 @@ def load_classifier(
     model_dir = Path(model_dir)
     model_config = read_json(model_dir / "model_config.json")
     labels = read_json(model_dir / "labels.json")
+    backbone_path = resolve_backbone_path(model_dir, model_config)
 
     model = BackboneLinearClassifier(
-        backbone_model_name=str(model_config["backbone_model_name"]),
+        backbone_model_name=str(backbone_path),
         num_classes=int(model_config["num_classes"]),
         freeze_backbone=True,
     )

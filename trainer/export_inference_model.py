@@ -6,7 +6,7 @@ from typing import Any
 
 import torch
 from safetensors.torch import save_file
-from transformers import AutoImageProcessor
+from transformers import AutoImageProcessor, AutoModel
 
 from model_core.model import BackboneLinearClassifier
 from pipeline import utils
@@ -14,6 +14,8 @@ from pipeline import utils
 
 ARCHITECTURE = "backbone_linear_classifier"
 ARCHITECTURE_VERSION = 1
+BACKBONE_DIR_NAME = "backbone"
+PROCESSOR_DIR_NAME = "processor"
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,6 +63,10 @@ def build_model_config(
         "architecture": ARCHITECTURE,
         "architecture_version": ARCHITECTURE_VERSION,
         "backbone_model_name": trainer_cfg["backbone_model_name"],
+        "backbone": {
+            "source_model_name": trainer_cfg["backbone_model_name"],
+            "path": BACKBONE_DIR_NAME,
+        },
         "feature_pooling": BackboneLinearClassifier.feature_pooling,
         "image_size": int(trainer_cfg["image_size"]),
         "num_classes": num_classes,
@@ -80,6 +86,18 @@ def extract_classifier_state(state_dict: dict[str, torch.Tensor]) -> dict[str, t
         "weight": state_dict["classifier.weight"].detach().cpu(),
         "bias": state_dict["classifier.bias"].detach().cpu(),
     }
+
+
+def extract_backbone_state(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    backbone_prefix = "backbone."
+    backbone_state = {
+        key.removeprefix(backbone_prefix): value.detach().cpu()
+        for key, value in state_dict.items()
+        if key.startswith(backbone_prefix)
+    }
+    if not backbone_state:
+        raise ValueError("Checkpoint is missing backbone weights")
+    return backbone_state
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -109,8 +127,22 @@ def export_inference_model(
         classifier_weight=classifier_state["weight"],
     )
 
+    backbone = AutoModel.from_pretrained(model_config["backbone_model_name"])
+    incompatible_keys = backbone.load_state_dict(extract_backbone_state(state_dict), strict=False)
+    if incompatible_keys.missing_keys:
+        raise ValueError(
+            "Missing keys while loading checkpoint backbone state: "
+            f"{incompatible_keys.missing_keys}"
+        )
+    if incompatible_keys.unexpected_keys:
+        raise ValueError(
+            "Unexpected keys while loading checkpoint backbone state: "
+            f"{incompatible_keys.unexpected_keys}"
+        )
+    backbone.save_pretrained(output_dir / BACKBONE_DIR_NAME)
+
     processor = AutoImageProcessor.from_pretrained(model_config["backbone_model_name"])
-    processor.save_pretrained(output_dir / "processor")
+    processor.save_pretrained(output_dir / PROCESSOR_DIR_NAME)
 
     save_file(classifier_state, output_dir / "classifier.safetensors")
     write_json(output_dir / "model_config.json", model_config)
@@ -121,6 +153,9 @@ def export_inference_model(
             "artifact_version": artifact_version,
             "source_checkpoint": str(checkpoint_path),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+            "backbone_source_model_name": model_config["backbone"]["source_model_name"],
+            "backbone_dir": model_config["backbone"]["path"],
+            "processor_dir": PROCESSOR_DIR_NAME,
             "metrics": checkpoint.get("metrics", {}),
             "epoch": checkpoint.get("epoch"),
         },
