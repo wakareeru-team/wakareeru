@@ -50,9 +50,12 @@ docker/
 data/                      # 生成数据、SQLite、图片、缓存与 review 输出
 tools/                     # 人工 review 等交互式辅助工具；不是自动 pipeline stage
 trainer/                   # crop 图像训练模块；当前从冻结 backbone + 线性头开始
+model_core/                # 训练与推理共享的分类模型、artifact loader 和 crop 分类逻辑
 src/crawler/               # 探索性 notebook；不是稳定管线入口
 docs/                      # 项目过程记录与实验说明
 ```
+
+平级仓库 `wakareeru-inference` 是 serverless 推理后端，通常通过 Git dependency 复用本仓库的 `model_core`，并从本地 `models/` 读取由本仓库导出的分类模型 artifact。改动 `model_core`、导出 artifact 结构或推理输入输出契约时，应同步检查 `wakareeru-inference` 的 README / AGENTS 与服务配置。
 
 ## 运行入口
 
@@ -118,6 +121,14 @@ python tools/label_review_gradio.py
 ```bash
 python -m trainer.train
 ```
+
+导出供推理仓库使用的分类模型 artifact：
+
+```bash
+python -m trainer.export_inference_model
+```
+
+导出配置位于 `trainer.export`。导出的分类模型目录是自包含 artifact，应包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json` 和 `manifest.json`。`model_config.json` 中的 `image_size` 来自 checkpoint 保存的训练配置；导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以 `model_config.json` 为准，避免训练与推理 resize/crop 尺寸错位。
 
 从人工复核 CSV 导入 review overlay（路径相对 `path.data_root` 解析，用 stable key + bbox IoU 匹配，不依赖自增 id）：
 
@@ -206,7 +217,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`image_size` 控制特征提取阶段输入 processor 的正方形 resize/crop 分辨率，修改后需要重跑 `feature_extraction`；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。`loss_tracking` 会按 `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 过滤人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。详细设计见 `docs/noise_review_loop.md`。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
 - `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。`manual_correction_invalidate_metadata_columns` 控制人工纠正标签后需要清空的原图分类路径派生 metadata；随后 `manual_correction_refill_operator_columns` 中的 operator 字段只有同 label 唯一非空值时补齐，`manual_correction_refill_submodel_bandai_columns` 作为一对只有唯一非空组合时才一起补齐。
-- `trainer.*` 控制 crop 图像训练入口；`trainer.image_size` 控制输入 processor 的正方形 resize/crop 分辨率，修改后需要重建 linear head feature cache；分类特征由 CLS 与排除 register tokens 后的 patch mean 拼接而成，pooling 方式或特征维度变化时也必须重建缓存；当前默认冻结 `backbone_model_name` 并只训练线性分类头，报告和 checkpoint 写入 `trainer.output_dir`。
+- `trainer.*` 控制 crop 图像训练入口；`trainer.image_size` 控制输入 processor 的正方形 resize/crop 分辨率，并写入 checkpoint。导出推理 artifact 时，`model_config.json` 与 `processor/preprocessor_config.json` 会使用 checkpoint 中保存的 `image_size`，而不是当前工作区后来改动的配置。修改 `trainer.image_size`、backbone、pooling 方式或特征维度后需要重建 linear head feature cache；加载已有 feature cache 时会用当前 metadata 的 label id 刷新 cache 内 labels，避免 metadata/labels 重新生成后沿用旧 label id。分类特征由 CLS 与排除 register tokens 后的 patch mean 拼接而成；当前默认冻结 `backbone_model_name` 并只训练线性分类头，报告和 checkpoint 写入 `trainer.output_dir`。
 
 ## 维护边界
 
