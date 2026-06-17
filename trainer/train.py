@@ -158,6 +158,38 @@ def make_feature_cache_path(
     return feature_cache_dir / feature_cache_file_name
 
 
+def refresh_feature_cache_labels(
+    *,
+    cache: dict[str, Any],
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    trainer_cfg: dict[str, Any],
+) -> None:
+    label_id_column = trainer_cfg["label_id_column"]
+    for split, split_df in (("train", train_df), ("val", val_df)):
+        current_labels = torch.tensor(
+            split_df[label_id_column].astype(int).to_numpy(),
+            dtype=torch.long,
+        )
+        cached_labels = cache[split]["labels"].long()
+        if cached_labels.shape != current_labels.shape:
+            raise ValueError(
+                "linear head特征缓存的label数量与当前metadata不一致，"
+                "请设置feature_cache_rebuild=true后重建。"
+            )
+        if not torch.equal(cached_labels, current_labels):
+            changed_count = int(cached_labels.ne(current_labels).sum().item())
+            logger.info(
+                "刷新linear head特征缓存%s labels：%d/%d个label_id发生变化。",
+                split,
+                changed_count,
+                int(current_labels.numel()),
+            )
+            cache[split]["labels"] = current_labels
+        else:
+            cache[split]["labels"] = cached_labels
+
+
 @torch.inference_mode()
 def extract_feature_table(
     *,
@@ -252,6 +284,12 @@ def load_or_create_feature_cache(
                 "linear head特征缓存的image_path顺序与当前train/val切分不一致，"
                 "请设置feature_cache_rebuild=true后重建。"
             )
+        refresh_feature_cache_labels(
+            cache=cache,
+            train_df=train_df,
+            val_df=val_df,
+            trainer_cfg=trainer_cfg,
+        )
         validate_feature_cache(cache)
         return cache
 

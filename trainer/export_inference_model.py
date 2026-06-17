@@ -107,6 +107,16 @@ def write_json(path: Path, payload: Any) -> None:
     )
 
 
+def sync_processor_image_size(processor: Any, image_size: int) -> None:
+    size = {
+        "height": int(image_size),
+        "width": int(image_size),
+    }
+    processor.size = size
+    if getattr(processor, "crop_size", None) is not None:
+        processor.crop_size = size
+
+
 def export_inference_model(
     *,
     checkpoint_path: Path,
@@ -142,6 +152,7 @@ def export_inference_model(
     backbone.save_pretrained(output_dir / BACKBONE_DIR_NAME)
 
     processor = AutoImageProcessor.from_pretrained(model_config["backbone_model_name"])
+    sync_processor_image_size(processor, int(model_config["image_size"]))
     processor.save_pretrained(output_dir / PROCESSOR_DIR_NAME)
 
     save_file(classifier_state, output_dir / "classifier.safetensors")
