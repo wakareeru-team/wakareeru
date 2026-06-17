@@ -213,43 +213,23 @@ trainer:
   prediction_file_name: "val_predictions.csv"
   feature_cache_dir: "trainer_feature_cache"
   phases:
-    - name: "linear_head_warmup"
+    - name: "linear_head_alpha"
       train_mode: "linear_head"
       epochs: 30
       use_feature_cache: true
-      feature_cache_file_name: "linear_head_warmup_features.pt"
+      feature_cache_file_name: "linear_head_alpha_features.pt"
       feature_cache_rebuild: true
       feature_cache_amp_enabled: false
       learning_rate: 1e-3
       weight_decay: 1e-4
-      lora_r: 8
-      lora_alpha: 16
-      lora_dropout: 0.05
-      lora_bias: "none"
-      head_learning_rate: 1e-3
-      lora_learning_rate: 1e-4
-      early_stopping_enabled: false
-      early_stopping_monitor: "val_macro_f1"
-      early_stopping_mode: "max" # larger is better
-      early_stopping_patience: 3
-      early_stopping_min_delta: 0.0
-    - name: "lora_attention"
-      train_mode: "lora"
-      epochs: 30
-      use_feature_cache: false
-      feature_cache_file_name: "unused_lora_features.pt"
-      feature_cache_rebuild: false
-      feature_cache_amp_enabled: false
-      weight_decay: 1e-4
-      lora_r: 8
-      lora_alpha: 16
-      lora_dropout: 0.05
-      lora_bias: "none"
-      head_learning_rate: 1e-3
-      lora_learning_rate: 1e-4
       early_stopping_enabled: true
       early_stopping_monitor: "val_macro_f1"
       early_stopping_mode: "max" # larger is better
       early_stopping_patience: 3
       early_stopping_min_delta: 0.0
+  export:
+    checkpoint_path: "trainer_runs/CHANGE_ME/linear_head_linear_head_alpha_best.pt"
+    output_dir: "model/wakareeru-0.1.0-alpha.1"
+    artifact_version: 0.1.0-alpha.1"
+    force: false
   
