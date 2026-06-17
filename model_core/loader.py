@@ -20,6 +20,8 @@ class LoadedClassifier:
 
 
 def read_json(path: Path) -> Any:
+    if not path.is_file():
+        raise FileNotFoundError(f"JSON file not found: {path}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -37,9 +39,21 @@ def resolve_backbone_path(model_dir: Path, model_config: dict[str, Any]) -> Path
     backbone_path = Path(str(backbone_config["path"]))
     if not backbone_path.is_absolute():
         backbone_path = model_dir / backbone_path
-    if not backbone_path.exists():
+    if not backbone_path.is_dir():
         raise FileNotFoundError(f"Backbone directory not found: {backbone_path}")
     return backbone_path
+
+
+def require_file(path: Path, description: str) -> Path:
+    if not path.is_file():
+        raise FileNotFoundError(f"{description} not found: {path}")
+    return path
+
+
+def require_dir(path: Path, description: str) -> Path:
+    if not path.is_dir():
+        raise FileNotFoundError(f"{description} not found: {path}")
+    return path
 
 
 def load_classifier(
@@ -49,23 +63,27 @@ def load_classifier(
     local_files_only: bool = True,
 ) -> LoadedClassifier:
     model_dir = Path(model_dir)
+    require_dir(model_dir, "Model directory")
     model_config = read_json(model_dir / "model_config.json")
     labels = read_json(model_dir / "labels.json")
     backbone_path = resolve_backbone_path(model_dir, model_config)
+    processor_path = require_dir(model_dir / "processor", "Processor directory")
+    classifier_path = require_file(model_dir / "classifier.safetensors", "Classifier weights")
 
     model = BackboneLinearClassifier(
         backbone_model_name=str(backbone_path),
         num_classes=int(model_config["num_classes"]),
         freeze_backbone=True,
+        local_files_only=True,
     )
-    classifier_state = load_file(model_dir / "classifier.safetensors")
+    classifier_state = load_file(classifier_path)
     model.classifier.load_state_dict(classifier_state)
     model.to(device)
     model.eval()
 
     processor = AutoImageProcessor.from_pretrained(
-        model_dir / "processor",
-        local_files_only=local_files_only,
+        processor_path,
+        local_files_only=True,
     )
 
     return LoadedClassifier(

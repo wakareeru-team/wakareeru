@@ -14,9 +14,13 @@ class BackboneLinearClassifier(nn.Module):
         backbone_model_name: str,
         num_classes: int,
         freeze_backbone: bool,
+        local_files_only: bool = False,
     ) -> None:
         super().__init__()
-        self.backbone = AutoModel.from_pretrained(backbone_model_name)
+        self.backbone = AutoModel.from_pretrained(
+            backbone_model_name,
+            local_files_only=local_files_only,
+        )
         self.feature_dim = int(self.backbone.config.hidden_size) * 2
         self.classifier = nn.Linear(self.feature_dim, num_classes)
         self.backbone_frozen = False
