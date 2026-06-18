@@ -1,5 +1,7 @@
 # わかれーる Wakareeru
 
+[![model tag](https://img.shields.io/github/v/tag/SniperPigeon/wakareeru?filter=v*&label=model)](https://github.com/SniperPigeon/wakareeru/tags)
+[![inference tag](https://img.shields.io/github/v/tag/SniperPigeon/wakareeru-inference?filter=inference-v*&label=inference)](https://github.com/SniperPigeon/wakareeru-inference/tags)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Conda](https://img.shields.io/badge/Conda-environment.yml-44A833?logo=anaconda&logoColor=white)](environment.yml)
 [![PyTorch](https://img.shields.io/badge/PyTorch-required-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
