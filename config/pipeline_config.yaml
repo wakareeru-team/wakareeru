@@ -237,7 +237,7 @@ trainer:
     # "latest_best" / "latest" = trainer.latest_run_pointer指向的最新run中最后一个phase的best checkpoint。
     # 也可以填写相对path.data_root的具体checkpoint路径。
     checkpoint_path: "latest_best"
-    output_dir: "model/wakareeru-0.1.0-alpha.1"
-    artifact_version: "0.1.0-alpha.1"
+    output_dir: "model/wakareeru-0.1.1-alpha.1"
+    artifact_version: "0.1.1-alpha.1"
     force: false
   
