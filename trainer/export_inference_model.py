@@ -1,5 +1,6 @@
 import argparse
 import json
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -164,12 +165,15 @@ def sync_processor_image_size(processor: Any, image_size: int) -> None:
 def export_inference_model(
     *,
     checkpoint_path: Path,
+    l10n_metadata_path: Path,
     output_dir: Path,
     artifact_version: str,
     force: bool,
 ) -> None:
     if output_dir.exists() and not force:
         raise FileExistsError(f"Output directory already exists: {output_dir}")
+    if not l10n_metadata_path.is_file():
+        raise FileNotFoundError(f"Localization metadata not found: {l10n_metadata_path}")
     output_dir.mkdir(parents=True, exist_ok=force)
 
     checkpoint = load_checkpoint(checkpoint_path)
@@ -202,6 +206,7 @@ def export_inference_model(
     save_file(classifier_state, output_dir / "classifier.safetensors")
     write_json(output_dir / "model_config.json", model_config)
     write_json(output_dir / "labels.json", checkpoint["labels"])
+    shutil.copy2(l10n_metadata_path, output_dir / l10n_metadata_path.name)
     write_json(
         output_dir / "manifest.json",
         {
@@ -220,9 +225,12 @@ def export_inference_model(
 def export_inference_model_from_config(config: dict[str, Any]) -> None:
     export_cfg = config["trainer"]["export"]
     checkpoint_path = resolve_export_checkpoint_path(config, export_cfg)
+    dataset_root = utils.join_data_root(config["path"]["dataset_dir"], config=config)
+    l10n_metadata_path = dataset_root / config["crops_storage"]["l10n_metadata_file_name"]
     output_dir = utils.join_data_root(export_cfg["output_dir"], config=config)
     export_inference_model(
         checkpoint_path=checkpoint_path,
+        l10n_metadata_path=l10n_metadata_path,
         output_dir=output_dir,
         artifact_version=str(export_cfg["artifact_version"]),
         force=bool(export_cfg["force"]),

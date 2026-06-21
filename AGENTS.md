@@ -128,7 +128,7 @@ python -m trainer.train
 python -m trainer.export_inference_model
 ```
 
-导出配置位于 `trainer.export`。训练完成后会在 `trainer.output_dir` 下更新 `trainer.latest_run_pointer` 指针；`trainer.export.checkpoint_path: "latest_best"` 会导出最新训练 run 最后一个 phase 的 best checkpoint，也可以填具体 checkpoint 路径。导出的分类模型目录是自包含 artifact，应包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json` 和 `manifest.json`。`model_config.json` 中的 `image_size` 来自 checkpoint 保存的训练配置；导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以 `model_config.json` 为准，避免训练与推理 resize/crop 尺寸错位。
+导出配置位于 `trainer.export`。训练完成后会在 `trainer.output_dir` 下更新 `trainer.latest_run_pointer` 指针；`trainer.export.checkpoint_path: "latest_best"` 会导出最新训练 run 最后一个 phase 的 best checkpoint，也可以填具体 checkpoint 路径。导出的分类模型目录是自包含 artifact，应包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json`、`l10n_metadata.json` 和 `manifest.json`；其中 `l10n_metadata.json` 从 `path.dataset_dir` 下复制，缺失时导出直接报错。`model_config.json` 中的 `image_size` 来自 checkpoint 保存的训练配置；导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以 `model_config.json` 为准，避免训练与推理 resize/crop 尺寸错位。
 
 从人工复核 CSV 导入 review overlay（路径相对 `path.data_root` 解析，用 stable key + bbox IoU 匹配，不依赖自增 id）：
 
