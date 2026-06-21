@@ -211,135 +211,110 @@ def build_label_tables(metadata: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
     return metadata, labels
 
 
-def _clean_l10n_text(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip()
+def _parse_l10n_json_array(value: object, *, label_ja: str, column: str) -> list[str]:
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"label_metadata {label_ja!r} 的 {column} 不是合法JSON") from exc
+    if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
+        raise ValueError(f"label_metadata {label_ja!r} 的 {column} 必须是字符串数组")
+    if any(not item.strip() for item in parsed):
+        raise ValueError(f"label_metadata {label_ja!r} 的 {column} 包含空字符串")
+    return [item.strip() for item in parsed]
 
 
-def _most_common_text(values: pd.Series) -> str:
-    cleaned = values.map(_clean_l10n_text)
-    cleaned = cleaned[cleaned.ne("")]
-    if cleaned.empty:
-        return ""
-    counts = cleaned.value_counts()
-    return sorted(counts[counts.eq(counts.max())].index)[0]
+def _validate_canonical_l10n_text(value: str, *, label_ja: str, field: str) -> None:
+    if "http://" in value or "https://" in value or re.search(r"\]\([^)]*\)", value):
+        raise ValueError(f"label_metadata {label_ja!r} 的 {field} 包含链接污染")
 
 
-def _build_operator_translations(label_metadata: pd.DataFrame) -> dict[str, list[str]]:
-    operators: list[tuple[str, str]] = []
-    for operator_ja, rows in label_metadata.groupby("operator_jp", sort=False, dropna=True):
-        operator_ja = _clean_l10n_text(operator_ja)
-        if not operator_ja:
-            continue
-        operators.append((operator_ja, _most_common_text(rows["operator_en"])))
-    operators.sort(key=lambda pair: pair[0])
-    return {
-        "ja": [operator_ja for operator_ja, _ in operators],
-        "en": [operator_en for _, operator_en in operators],
-        "zh": ["" for _ in operators],
-    }
+def build_l10n_metadata_from_db(labels: pd.DataFrame, db_path: Path) -> list[dict]:
+    required_label_columns = {"label_id", "label"}
+    missing_label_columns = required_label_columns - set(labels.columns)
+    if missing_label_columns:
+        raise ValueError(f"生成l10n metadata缺少labels列: {sorted(missing_label_columns)}")
 
-
-def _validate_existing_l10n_metadata(existing: object) -> list[dict]:
-    if not isinstance(existing, list):
-        raise ValueError("既有l10n metadata必须是JSON列表，拒绝覆盖。")
-
-    seen_labels: set[str] = set()
-    for index, item in enumerate(existing):
-        if not isinstance(item, dict):
-            raise ValueError(f"既有l10n metadata第{index}项不是字典，拒绝覆盖。")
-        label = item.get("label")
-        operator = item.get("operator")
-        if not isinstance(label, dict) or not isinstance(operator, dict):
-            raise ValueError(f"既有l10n metadata第{index}项缺少label或operator字典，拒绝覆盖。")
-        if isinstance(item.get("id"), bool) or not isinstance(item.get("id"), int):
-            raise ValueError(f"既有l10n metadata第{index}项的id不是整数，拒绝覆盖。")
-        label_ja = label.get("ja")
-        if not isinstance(label_ja, str) or not label_ja.strip():
-            raise ValueError(f"既有l10n metadata第{index}项缺少label.ja，拒绝覆盖。")
-        if any(not isinstance(label.get(language), str) for language in ("en", "zh")):
-            raise ValueError(f"既有l10n metadata第{index}项的label翻译不是字符串，拒绝覆盖。")
-        if label_ja in seen_labels:
-            raise ValueError(f"既有l10n metadata包含重复label.ja={label_ja!r}，拒绝覆盖。")
-        seen_labels.add(label_ja)
-        for language in ("ja", "en", "zh"):
-            if not isinstance(operator.get(language), list):
-                raise ValueError(
-                    f"既有l10n metadata的operator.{language}必须是列表，拒绝覆盖。"
-                )
-            if any(not isinstance(value, str) for value in operator[language]):
-                raise ValueError(
-                    f"既有l10n metadata的operator.{language}元素必须是字符串，拒绝覆盖。"
-                )
-        operator_lengths = {len(operator[language]) for language in ("ja", "en", "zh")}
-        if len(operator_lengths) != 1:
-            raise ValueError("既有l10n metadata的operator语言列表长度不一致，拒绝覆盖。")
-        if len(operator["ja"]) != len(set(operator["ja"])):
-            raise ValueError("既有l10n metadata包含重复operator.ja，拒绝覆盖。")
-    return existing
-
-
-def _preserve_existing_translations(current: dict, existing: dict) -> None:
-    current["label"]["en"] = _clean_l10n_text(existing["label"].get("en"))
-    current["label"]["zh"] = _clean_l10n_text(existing["label"].get("zh"))
-
-    existing_operator = existing["operator"]
-    existing_by_ja = {
-        operator_ja: (existing_operator["en"][index], existing_operator["zh"][index])
-        for index, operator_ja in enumerate(existing_operator["ja"])
-    }
-    for index, operator_ja in enumerate(current["operator"]["ja"]):
-        if operator_ja not in existing_by_ja:
-            continue
-        operator_en, operator_zh = existing_by_ja[operator_ja]
-        current["operator"]["en"][index] = _clean_l10n_text(operator_en)
-        current["operator"]["zh"][index] = _clean_l10n_text(operator_zh)
-
-
-def build_l10n_metadata(
-    labels: pd.DataFrame,
-    metadata: pd.DataFrame,
-    existing_path: Path,
-) -> tuple[list[dict], int]:
-    required_columns = {"label", "operator_jp", "operator_en", "wiki_title"}
-    missing_columns = required_columns - set(metadata.columns)
-    if missing_columns:
-        raise ValueError(f"生成l10n metadata缺少metadata列: {sorted(missing_columns)}")
-
-    existing_by_label: dict[str, dict] = {}
-    if existing_path.exists():
-        with existing_path.open("r", encoding="utf-8") as file:
-            existing = _validate_existing_l10n_metadata(json.load(file))
-        existing_by_label = {item["label"]["ja"]: item for item in existing}
+    with sqlite3.connect(db_path) as conn:
+        canonical = pd.read_sql_query(
+            """
+            SELECT label_ja, label_en, label_zh,
+                   operator_ja_json, operator_en_json, operator_zh_json,
+                   wiki_title_ja
+            FROM label_metadata
+            """,
+            conn,
+        )
+    canonical_by_label = canonical.set_index("label_ja", drop=False).to_dict(orient="index")
+    missing_labels = sorted(set(labels["label"]) - set(canonical_by_label))
+    if missing_labels:
+        raise ValueError(
+            "label_metadata缺少当前数据集标签，拒绝从images旧字段或既有JSON回填: "
+            f"{missing_labels}"
+        )
 
     result = []
-    preserved_count = 0
     for row in labels.itertuples(index=False):
-        label_metadata = metadata.loc[metadata["label"].eq(row.label)]
-        item = {
-            "id": int(row.label_id),
-            "label": {"ja": row.label, "en": "", "zh": ""},
-            "operator": _build_operator_translations(label_metadata),
-            "wiki_title_ja": _most_common_text(label_metadata["wiki_title"]),
+        source = canonical_by_label[row.label]
+        operators = {
+            language: _parse_l10n_json_array(
+                source[f"operator_{language}_json"],
+                label_ja=row.label,
+                column=f"operator_{language}_json",
+            )
+            for language in ("ja", "en", "zh")
         }
-        existing = existing_by_label.get(row.label)
-        if existing is not None and existing.get("id") == int(row.label_id):
-            _preserve_existing_translations(item, existing)
-            preserved_count += 1
-        result.append(item)
-    return result, preserved_count
+        if len({len(values) for values in operators.values()}) != 1:
+            raise ValueError(f"label_metadata {row.label!r} 的三语operator数组长度不一致")
+        if len(operators["ja"]) != len(set(operators["ja"])):
+            raise ValueError(f"label_metadata {row.label!r} 包含重复operator_ja")
+
+        scalar_fields = {
+            "label_en": str(source["label_en"]).strip(),
+            "label_zh": str(source["label_zh"]).strip(),
+            "wiki_title_ja": str(source["wiki_title_ja"]).strip(),
+        }
+        if not scalar_fields["label_en"] or not scalar_fields["label_zh"]:
+            raise ValueError(f"label_metadata {row.label!r} 的英中label翻译不能为空")
+        for field, value in scalar_fields.items():
+            _validate_canonical_l10n_text(value, label_ja=row.label, field=field)
+        for language, values in operators.items():
+            for value in values:
+                _validate_canonical_l10n_text(
+                    value,
+                    label_ja=row.label,
+                    field=f"operator_{language}_json",
+                )
+        if any("/" in value for value in operators["ja"]):
+            raise ValueError(f"label_metadata {row.label!r} 的operator_ja包含双语言分隔符")
+        if any(re.search(r"[ぁ-んァ-ヶ一-龠々]", value) for value in operators["en"]):
+            raise ValueError(f"label_metadata {row.label!r} 的operator_en包含日文污染")
+        if any(re.search(r"[ぁ-んァ-ヶ]", value) for value in operators["zh"]):
+            raise ValueError(f"label_metadata {row.label!r} 的operator_zh包含日文假名污染")
+
+        result.append(
+            {
+                "id": int(row.label_id),
+                "label": {
+                    "ja": row.label,
+                    "en": scalar_fields["label_en"],
+                    "zh": scalar_fields["label_zh"],
+                },
+                "operator": operators,
+                "wiki_title_ja": scalar_fields["wiki_title_ja"],
+            }
+        )
+    return result
 
 
-def write_l10n_metadata(labels: pd.DataFrame, metadata: pd.DataFrame, output_path: Path) -> int:
-    l10n_metadata, preserved_count = build_l10n_metadata(labels, metadata, output_path)
+def write_l10n_metadata(labels: pd.DataFrame, db_path: Path, output_path: Path) -> int:
+    l10n_metadata = build_l10n_metadata_from_db(labels, db_path)
     temporary_path = output_path.with_suffix(f"{output_path.suffix}.tmp")
     temporary_path.write_text(
         json.dumps(l10n_metadata, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     temporary_path.replace(output_path)
-    return preserved_count
+    return len(l10n_metadata)
 
 
 def flush_crop_save_updates(db_path: Path, updates: list[tuple[str, int]]) -> None:
@@ -635,7 +610,6 @@ def main(config: dict | None = None) -> None:
             return constants.STAGE_PASS  # type: ignore
         
         metadata, labels = build_label_tables(metadata)
-        l10n_source_metadata = metadata
         output_metadata_columns = list(crops_storage_config["metadata_columns"])
         missing_metadata_columns = [col for col in output_metadata_columns if col not in metadata.columns]
         if missing_metadata_columns:
@@ -658,15 +632,15 @@ def main(config: dict | None = None) -> None:
 
         logger.info("crop图像保存完成，已成功保存%d条crop数据。", len(metadata))
         logger.info("metadata已保存至%s，labels已保存至%s，manifest已保存至%s。", metadata_path, labels_path, manifest_path)
-        preserved_translation_count = write_l10n_metadata(
+        exported_l10n_count = write_l10n_metadata(
             labels,
-            l10n_source_metadata,
+            db_path,
             l10n_metadata_path,
         )
         logger.info(
-            "多语言metadata已保存至%s；按label.ja和id保留%d条既有翻译。",
+            "已从label_metadata规范表导出%d条多语言metadata至%s。",
+            exported_l10n_count,
             l10n_metadata_path,
-            preserved_translation_count,
         )
 
         return constants.STAGE_COMPLETED #type:ignore flatten格式处理完成，退出程序
