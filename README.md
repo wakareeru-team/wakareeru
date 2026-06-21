@@ -2,16 +2,14 @@
 
 [![model tag](https://img.shields.io/github/v/tag/SniperPigeon/wakareeru?filter=v*&label=model)](https://github.com/SniperPigeon/wakareeru/tags)
 [![inference tag](https://img.shields.io/github/v/tag/SniperPigeon/wakareeru-inference?filter=inference-v*&label=inference)](https://github.com/SniperPigeon/wakareeru-inference/tags)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Conda](https://img.shields.io/badge/Conda-environment.yml-44A833?logo=anaconda&logoColor=white)](environment.yml)
-[![PyTorch](https://img.shields.io/badge/PyTorch-required-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![Transformers](https://img.shields.io/badge/HuggingFace-Transformers-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/docs/transformers)
-[![OpenAI](https://img.shields.io/badge/OpenAI-API-412991?logo=openai&logoColor=white)](https://platform.openai.com/)
-[![SQLite](https://img.shields.io/badge/SQLite-manifest-003B57?logo=sqlite&logoColor=white)](data/commons_image_manifest.sqlite)
+[![last commit](https://img.shields.io/github/last-commit/SniperPigeon/wakareeru)](https://github.com/SniperPigeon/wakareeru/commits/main)
+[![commit activity](https://img.shields.io/github/commit-activity/m/SniperPigeon/wakareeru)](https://github.com/SniperPigeon/wakareeru/pulse)
+[![repo size](https://img.shields.io/github/repo-size/SniperPigeon/wakareeru)](https://github.com/SniperPigeon/wakareeru)
+[![top language](https://img.shields.io/github/languages/top/SniperPigeon/wakareeru)](https://github.com/SniperPigeon/wakareeru)
 
-`wakareeru` 是一个面向日本铁路车辆的细粒度图像分类模型以及其数据集与预处理管线项目。此项目**目前为数据预处理阶段**，我们从日文 Wikipedia 和 Wikimedia Commons 收集车辆系列、分类路径与图片，经过规则、SigLIP2过滤、LLM 元数据抽取和 Grounding-DINO 目标检测+主体裁切，DINOv3+分类头的小模型Small Loss Trick噪声过滤，最终为日本铁道车辆识别模型准备更干净的训练样本。
+`wakareeru` 是一个面向日本铁路车辆的细粒度图像分类数据集、预处理管线与训练项目。项目从日文 Wikipedia 和 Wikimedia Commons 收集车辆系列、分类路径与图片，经过规则与 SigLIP2 过滤、LLM 元数据抽取、Grounding-DINO 主体检测、DINOv3 特征与 small-loss 噪声筛查，最终生成可训练的 crop 数据集，并可训练、导出供推理服务使用的分类模型 artifact。
 
-当前重点覆盖 JR 东日本与 JR 货物车辆，但同样包含继承JNR的国铁车型的其他JR公司车型。目标是区分外观相近的系列与番台，例如 113 系 / 115 系、E231 系 / E233 系等。
+当前重点覆盖 JR 东日本与 JR 货物车辆，也可能包含由其他 JR 公司继承的 JNR 车型。覆盖范围由 `config/pipeline_config.yaml` 的 `crawler.active_operators` 控制；目标是区分外观相近的系列与番台，例如 113 系 / 115 系、E231 系 / E233 系等。
 
 ## 项目目标
 
@@ -20,7 +18,8 @@
 - 下载 Commons 图片并过滤内饰、局部细节、显示屏等不适合训练的图片。
 - 使用 LLM 从 Commons 分类路径中抽取番台、子型号、特殊编成、涂装和运营公司等结构化元数据。
 - 使用 Grounding-DINO 检测车辆主体并生成裁切框。
-- 为后续 DINOv2 / DINOv3 特征缓存、噪声样本检测和细粒度分类训练准备数据。
+- 使用 DINOv3 特征、small-loss tracking、人工复核与 Logistic Regression 形成噪声筛查闭环。
+- 生成带多语言 label metadata 的 crop 数据集，训练线性分类头并导出自包含推理 artifact。
 
 ## 技术栈
 
@@ -49,6 +48,13 @@ pipeline/                  # 主数据管线，每个 stage 可独立运行
   stage_06_llm_metadata_labeling.py
   stage_07_gdino_bbox.py
   stage_08_fine_grain_series.py
+  stage_09_DINOv3_feature_extraction.py
+  stage_10_train_loss_tracking.py
+  stage_11_loss_analysis.py
+  stage_12_logistic_regression_filter.py
+  stage_13_lr_prediction.py
+  stage_13b_label_metadata_translation.py
+  stage_14_store_crops.py
   constants.py
   utils.py
 config/
@@ -163,6 +169,20 @@ python tools/noise_review_gradio.py
 python tools/loss_round_spotcheck_gradio.py
 ```
 
+启动 label 分布与 crop 级纠正复核 UI：
+
+```bash
+python tools/label_review_gradio.py
+```
+
+导出新 label 的多语言 metadata 翻译队列；填写完成后用同一命令校验并回写数据库：
+
+```bash
+python pipeline_entry.py --only label_metadata_translation
+```
+
+翻译表路径由 `label_metadata_translation.review_file_path` 控制。已有 `label_metadata` 规范记录不会被翻译表覆盖。
+
 训练 crop 图像线性头：
 
 ```bash
@@ -175,13 +195,20 @@ python -m trainer.train
 python -m trainer.export_inference_model
 ```
 
-导出路径由 `config/pipeline_config.yaml` 的 `trainer.export` 控制。训练完成后会在 `trainer.output_dir` 下更新 `trainer.latest_run_pointer`；`trainer.export.checkpoint_path: "latest_best"` 会导出最新训练 run 最后一个 phase 的 best checkpoint，也可以填具体 checkpoint 路径。分类 artifact 包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json` 和 `manifest.json`；`model_config.json` 的 `image_size` 来自 checkpoint 保存的训练配置，导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以该 artifact 配置为准。
+导出路径由 `config/pipeline_config.yaml` 的 `trainer.export` 控制。训练完成后会在 `trainer.output_dir` 下更新 `trainer.latest_run_pointer`；`trainer.export.checkpoint_path: "latest_best"` 会导出最新训练 run 最后一个 phase 的 best checkpoint，也可以填具体 checkpoint 路径。分类 artifact 包含 `backbone/`、`processor/`、`classifier.safetensors`、`model_config.json`、`labels.json`、`l10n_metadata.json` 和 `manifest.json`；`l10n_metadata.json` 缺失时导出会直接报错。`model_config.json` 的 `image_size` 来自 checkpoint 保存的训练配置，导出时会同步 processor 默认 `size` / `crop_size`，推理侧也以该 artifact 配置为准。
 
 导出/导入人工复核 CSV（路径相对 `path.data_root` 解析，使用 stable key + bbox IoU 匹配）：
 
 ```bash
 python tools/export_noise_review_csv.py --output-csv-path review/noise_review_labels.csv
 python tools/import_noise_review_csv.py --review-csv-path review/noise_review_labels.csv
+```
+
+跨平台迁移图片后若遇到 Unicode NFC/NFD 文件名差异，可先 dry-run，再显式应用规范化：
+
+```bash
+python tools/normalize_image_paths.py
+python tools/normalize_image_paths.py --apply
 ```
 
 可用阶段包括：
@@ -201,7 +228,8 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 | `loss_analysis` | 聚合 loss 特征并生成噪声筛查分数 |
 | `logistic_regression_filter` | 基于人工复核标签训练 LR 噪声筛选器 |
 | `lr_prediction` | 生成 LR 噪声预测 CSV，并可选同步数据库 |
-| `store_crops` | 保存最终 crop 图像并生成 `metadata.csv` / `labels.csv`，其中 `manual_reviewed` 标记人工复核为 `ok` 的样本，人工错标纠正会优先覆盖导出标签 |
+| `label_metadata_translation` | 增量导出新 label 翻译队列，校验后回写 `label_metadata` 规范表 |
+| `store_crops` | 保存最终 crop 图像并生成 `metadata.csv`、`labels.csv` 与 `l10n_metadata.json`，人工错标纠正会优先覆盖导出标签 |
 
 ## 数据流
 
@@ -216,7 +244,9 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 9. `stage_09_DINOv3_feature_extraction.py` 提取 crop 图像特征，缓存 `features` 与 `crop_ids`，不绑定细粒度标签。
 10. `stage_10_train_loss_tracking.py` 按当前数据库标签动态生成本轮 label id，并过滤人工噪声与上一轮 LR 预测噪声后训练线性头。
 11. `stage_11_loss_analysis.py` 读取本轮 `label_map.json` 和 loss history，生成噪声筛查特征。
-12. `stage_14_store_crops.py` 保存最终 crop 图像，并在 `metadata.csv` 中写入 `manual_reviewed` 供评估集筛选；人工错标纠正会通过 crop 级 `manual_corrected_label` 覆盖训练和导出标签。
+12. `stage_12_logistic_regression_filter.py` 基于人工复核结果训练噪声筛选器，`stage_13_lr_prediction.py` 为未复核样本生成预测。
+13. `stage_13b_label_metadata_translation.py` 增量补齐新 label 的英中翻译与三语 operator metadata。
+14. `stage_14_store_crops.py` 保存最终 crop 图像，生成 `metadata.csv`、`labels.csv` 与 `l10n_metadata.json`；crop 级 `manual_corrected_label` 会覆盖训练和导出标签。
 
 噪声复核、人工纠正标签、LR 预测过滤和多轮 loss tracking 的完整设计见 [docs/noise_review_loop.md](docs/noise_review_loop.md)。
 
@@ -225,6 +255,7 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 - `categories`：每个系列解析到的 Commons 分类。
 - `images`：每张 Commons 图片的元数据、下载状态、过滤结果和 LLM 标签。
 - `crops`：Grounding-DINO 生成的主体框、置信度、裁切状态、噪声分数、人工复核标签、LR 预测标签和 crop 级人工纠正标签。
+- `label_metadata`：label 的英中翻译、三语 operator 数组与日文 Wikipedia title，是 `l10n_metadata.json` 的唯一规范来源。
 
 ## 配置
 
@@ -238,7 +269,9 @@ python tools/import_noise_review_csv.py --review-csv-path review/noise_review_la
 - `gdino.model_name`、`box_threshold`、`nms_iou_threshold` 控制主体检测。
 - `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 控制下一轮 loss tracking 是否排除人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。
 - `noise_detection` 用于后续 DINO 特征缓存与 small-loss trick 噪声检测实验；特征缓存只绑定 crop 图像和 `crop_id`，训练标签 id 在 loss tracking 轮次中动态生成。
-- `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列，默认包含 `manual_reviewed`。
+- `label_metadata_translation.review_file_path` 控制新 label 翻译队列 CSV 路径。
+- `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列，默认包含 `manual_reviewed`；`l10n_metadata_file_name` 控制多语言 metadata 文件名。
+- `trainer.*` 控制 crop 训练、feature cache、checkpoint 与推理 artifact 导出。
 
 ## 开发命令
 
@@ -251,11 +284,9 @@ pytest
 
 ## 当前状态
 
-项目仍处于数据集构建与清洗阶段。当前主线管线已经覆盖标签解析、Commons manifest、图片下载、SigLIP2 图片过滤、LLM 元数据标注与 Grounding-DINO 主体裁切。`src/crawler/` 下的 notebook 主要用于实验和验证，不是稳定入口。
+项目仍在持续构建数据集并迭代分类模型。目前已有alpha版本模型为应用提供推理后端。当前主线已覆盖数据采集、过滤与主体裁切、细粒度标签构造、DINOv3 特征缓存、噪声复核、数据集导出、冻结 backbone 的线性头训练以及推理 artifact 导出。`src/crawler/` 下的 notebook 主要用于实验和验证，不是稳定入口。
 
 后续方向包括：
 
 - 扩展覆盖范围到 JR 本州三社、全 JR 公司与私铁车辆。
-- 基于 DINOv2 / DINOv3 特征缓存进行噪声样本检测。
-- 构建可增量扩展的 prototype bank，用于新增系列的检索式分类。
 - 整理 Hugging Face Dataset 格式并发布可复现实验配置。
