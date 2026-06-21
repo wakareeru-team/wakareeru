@@ -177,12 +177,12 @@ crops_storage:
   image_extension: "jpeg"
   metadata_file_name: "metadata.csv"
   labels_file_name: "labels.csv"
-  labels_l10n_file_name: "labels_l10n.csv"
+  l10n_metadata_file_name: "l10n_metadata.json"
   label_column: "fine_grained_series"
   manual_correction_invalidate_metadata_columns: ["submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery"]
   manual_correction_refill_operator_columns: ["operator_en", "operator_jp"]
   manual_correction_refill_submodel_bandai_columns: ["submodel", "bandai"]
-  image_metadata_columns: ['downloaded_path',"series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
+  image_metadata_columns: ['downloaded_path', "wiki_title", "series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
   metadata_columns: ["image_path", "label_id", "label", "label_en", "manual_reviewed", "series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
   jpeg_quality: 95
 
