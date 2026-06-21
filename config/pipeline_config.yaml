@@ -162,6 +162,10 @@ lr_prediction: # 对未知数据应用LR模型
   prediction_file_name: "lr_predictions.csv"
   sync_to_db: true
 
+label_metadata_translation:
+  # 相对path.data_root；缺失label会导出到此CSV并中断pipeline，填写后重跑本阶段回写数据库。
+  review_file_path: "review/label_metadata_translation.csv"
+
 crops_storage:
   format: 'flatten' #存储格式，可选'flatten'或'nested'。'flatten'表示将所有crop数据存储在同一层级的表中，'nested'表示按照series或submodel等层级结构存储。
   reprocess: false #为false则跳过已经存储crop的数据

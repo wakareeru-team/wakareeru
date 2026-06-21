@@ -284,6 +284,10 @@ def build_l10n_metadata_from_db(labels: pd.DataFrame, db_path: Path) -> list[dic
                     label_ja=row.label,
                     field=f"operator_{language}_json",
                 )
+        if re.search(r"[ぁ-んァ-ヶ一-龠々]", scalar_fields["label_en"]):
+            raise ValueError(f"label_metadata {row.label!r} 的label_en包含日文污染")
+        if re.search(r"[ぁ-んァ-ヶ]", scalar_fields["label_zh"]):
+            raise ValueError(f"label_metadata {row.label!r} 的label_zh包含日文假名污染")
         if any("/" in value for value in operators["ja"]):
             raise ValueError(f"label_metadata {row.label!r} 的operator_ja包含双语言分隔符")
         if any(re.search(r"[ぁ-んァ-ヶ一-龠々]", value) for value in operators["en"]):

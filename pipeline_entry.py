@@ -22,6 +22,7 @@ import pipeline.stage_10_train_loss_tracking as stage_10  # noqa: E402
 import pipeline.stage_11_loss_analysis as stage_11  # noqa: E402
 import pipeline.stage_12_logistic_regression_filter as stage_12  # noqa: E402
 import pipeline.stage_13_lr_prediction as stage_13  # noqa: E402
+import pipeline.stage_13b_label_metadata_translation as stage_13b  # noqa: E402
 import pipeline.stage_14_store_crops as stage_14  # noqa: E402
 logger = get_logger("run_pipeline")
 
@@ -39,6 +40,7 @@ STAGES: dict[str, tuple[str, callable]] = { #type: ignore
     "loss_analysis":         ("损失分析",          stage_11.main),
     "logistic_regression_filter": ("基于人工标记的logistic regression过滤", stage_12.main),
     "lr_prediction":         ("logistic regression预测", stage_13.main),
+    "label_metadata_translation": ("新车型多语言metadata导出与回写", stage_13b.main),
     "store_crops":          ("裁切结果存储与数据集构建", stage_14.main),
 }
 STAGE_KEYS = list(STAGES.keys())
