@@ -211,6 +211,59 @@ def build_label_tables(metadata: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
     return metadata, labels
 
 
+def build_labels_l10n(labels: pd.DataFrame, existing_path: Path) -> tuple[pd.DataFrame, int]:
+    labels_l10n = labels.loc[:, ["label_id", "label"]].rename(columns={"label": "label_ja"})
+    labels_l10n["label_en"] = ""
+    labels_l10n["label_zh"] = ""
+
+    if not existing_path.exists():
+        return labels_l10n, 0
+
+    existing = pd.read_csv(existing_path, dtype={"label_ja": "string"})
+    required_columns = {"label_id", "label_ja", "label_en", "label_zh"}
+    missing_columns = required_columns - set(existing.columns)
+    if missing_columns:
+        raise ValueError(
+            f"既有labels_l10n缺少必要列，拒绝覆盖: {sorted(missing_columns)}"
+        )
+    if existing["label_ja"].isna().any():
+        raise ValueError("既有labels_l10n包含空label_ja，拒绝覆盖。")
+    if existing["label_ja"].duplicated().any():
+        duplicated_labels = sorted(
+            existing.loc[existing["label_ja"].duplicated(keep=False), "label_ja"]
+            .dropna()
+            .astype(str)
+            .unique()
+        )
+        raise ValueError(f"既有labels_l10n包含重复label_ja，拒绝覆盖: {duplicated_labels}")
+
+    existing = existing.loc[:, ["label_id", "label_ja", "label_en", "label_zh"]].rename(
+        columns={
+            "label_id": "existing_label_id",
+            "label_en": "existing_label_en",
+            "label_zh": "existing_label_zh",
+        }
+    )
+    labels_l10n = labels_l10n.merge(existing, on="label_ja", how="left", validate="one_to_one")
+    matching_id = labels_l10n["label_id"].eq(labels_l10n["existing_label_id"])
+    labels_l10n.loc[matching_id, "label_en"] = labels_l10n.loc[
+        matching_id, "existing_label_en"
+    ].fillna("")
+    labels_l10n.loc[matching_id, "label_zh"] = labels_l10n.loc[
+        matching_id, "existing_label_zh"
+    ].fillna("")
+    preserved_count = int(matching_id.sum())
+    return labels_l10n.loc[:, ["label_id", "label_ja", "label_en", "label_zh"]], preserved_count
+
+
+def write_labels_l10n(labels: pd.DataFrame, output_path: Path) -> int:
+    labels_l10n, preserved_count = build_labels_l10n(labels, output_path)
+    temporary_path = output_path.with_suffix(f"{output_path.suffix}.tmp")
+    labels_l10n.to_csv(temporary_path, index=False, encoding="utf-8")
+    temporary_path.replace(output_path)
+    return preserved_count
+
+
 def flush_crop_save_updates(db_path: Path, updates: list[tuple[str, int]]) -> None:
     if not updates:
         return
@@ -511,6 +564,7 @@ def main(config: dict | None = None) -> None:
 
         metadata_path = dataset_root / crops_storage_config["metadata_file_name"]
         labels_path = dataset_root / crops_storage_config["labels_file_name"]
+        labels_l10n_path = dataset_root / crops_storage_config["labels_l10n_file_name"]
         manifest_path = dataset_root / "manifest.json"
         dataset_root.mkdir(parents=True, exist_ok=True)
         metadata.to_csv(metadata_path, index=False, encoding="utf-8")
@@ -524,7 +578,13 @@ def main(config: dict | None = None) -> None:
 
         logger.info("crop图像保存完成，已成功保存%d条crop数据。", len(metadata))
         logger.info("metadata已保存至%s，labels已保存至%s，manifest已保存至%s。", metadata_path, labels_path, manifest_path)
-        
+        preserved_translation_count = write_labels_l10n(labels, labels_l10n_path)
+        logger.info(
+            "多语言label表已保存至%s；按label_ja和label_id保留%d条既有翻译。",
+            labels_l10n_path,
+            preserved_translation_count,
+        )
+
         return constants.STAGE_COMPLETED #type:ignore flatten格式处理完成，退出程序
 
 

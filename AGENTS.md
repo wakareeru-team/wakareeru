@@ -172,7 +172,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 | `loss_analysis` | `stage_11_loss_analysis.py` | 读取本轮 `label_map.json` 和 loss history，聚合噪声筛查特征 |
 | `logistic_regression_filter` | `stage_12_logistic_regression_filter.py` | 基于人工复核标签训练 Logistic Regression 噪声筛选器 |
 | `lr_prediction` | `stage_13_lr_prediction.py` | 对未复核样本生成 LR 噪声预测 CSV，并可选同步到数据库 |
-| `store_crops` | `stage_14_store_crops.py` | 将 crop 图像保存为最终数据集，并生成 `metadata.csv` / `labels.csv`；`metadata.manual_reviewed` 表示人工复核为 `ok` 的高确信样本 |
+| `store_crops` | `stage_14_store_crops.py` | 将 crop 图像保存为最终数据集，并生成 `metadata.csv` / `labels.csv` / `labels_l10n.csv`；`metadata.manual_reviewed` 表示人工复核为 `ok` 的高确信样本 |
 
 `pipeline/deprecated_stage_08_siglip_crop_filtering.py` 是弃用阶段，不应作为默认流程的一部分。
 
@@ -216,7 +216,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 - `gdino.*` 控制 Grounding-DINO 检测阈值、NMS 与批大小。
 - `noise_detection.*` 控制后续 DINO 特征缓存和 small-loss 噪声检测实验；`image_size` 控制特征提取阶段输入 processor 的正方形 resize/crop 分辨率，修改后需要重跑 `feature_extraction`；`feature_cache_shard_size` 控制特征提取阶段 `.pt` 分片保存后再聚合为单文件缓存。训练标签 id 在 `loss_tracking` 每轮根据当前数据库标签动态生成，并保存到该轮 loss analysis 目录的 `label_map.json`。`loss_tracking` 会按 `noise_detection.exclude_manual_noise` / `exclude_predicted_noise` 过滤人工噪声与上一轮 LR 预测噪声；`manual_corrected_label` 会覆盖原标签并保留为训练样本。详细设计见 `docs/noise_review_loop.md`。
 - `logistic_regression_filter.*` 控制人工复核标签上的 Logistic Regression 噪声筛选实验。
-- `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。`manual_correction_invalidate_metadata_columns` 控制人工纠正标签后需要清空的原图分类路径派生 metadata；随后 `manual_correction_refill_operator_columns` 中的 operator 字段只有同 label 唯一非空值时补齐，`manual_correction_refill_submodel_bandai_columns` 作为一对只有唯一非空组合时才一起补齐。
+- `crops_storage.metadata_columns` 控制最终 `metadata.csv` 输出列；默认包含 `manual_reviewed`，用于筛选人工复核为 `ok` 的评估样本。`labels_l10n_file_name` 控制多语言标签表文件名；重跑时按 `label_ja` 匹配，且仅在 `label_id` 一致时保留已有 `label_en` / `label_zh`。`manual_correction_invalidate_metadata_columns` 控制人工纠正标签后需要清空的原图分类路径派生 metadata；随后 `manual_correction_refill_operator_columns` 中的 operator 字段只有同 label 唯一非空值时补齐，`manual_correction_refill_submodel_bandai_columns` 作为一对只有唯一非空组合时才一起补齐。
 - `trainer.*` 控制 crop 图像训练入口；`trainer.image_size` 控制输入 processor 的正方形 resize/crop 分辨率，并写入 checkpoint。训练结束后 `trainer.latest_run_pointer` 指向最新 run 目录，`run_summary.json` 记录每个 phase 的 best checkpoint；`trainer.export.checkpoint_path` 可用 `"latest_best"` 指向最新 run 的 best checkpoint。导出推理 artifact 时，`model_config.json` 与 `processor/preprocessor_config.json` 会使用 checkpoint 中保存的 `image_size`，而不是当前工作区后来改动的配置。修改 `trainer.image_size`、backbone、pooling 方式或特征维度后需要重建 linear head feature cache；加载已有 feature cache 时会用当前 metadata 的 label id 刷新 cache 内 labels，避免 metadata/labels 重新生成后沿用旧 label id。分类特征由 CLS 与排除 register tokens 后的 patch mean 拼接而成；当前默认冻结 `backbone_model_name` 并只训练线性分类头，报告和 checkpoint 写入 `trainer.output_dir`。
 
 ## 维护边界

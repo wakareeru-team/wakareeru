@@ -177,6 +177,7 @@ crops_storage:
   image_extension: "jpeg"
   metadata_file_name: "metadata.csv"
   labels_file_name: "labels.csv"
+  labels_l10n_file_name: "labels_l10n.csv"
   label_column: "fine_grained_series"
   manual_correction_invalidate_metadata_columns: ["submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery"]
   manual_correction_refill_operator_columns: ["operator_en", "operator_jp"]
