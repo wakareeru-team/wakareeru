@@ -211,6 +211,116 @@ def build_label_tables(metadata: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
     return metadata, labels
 
 
+def _parse_l10n_json_array(value: object, *, label_ja: str, column: str) -> list[str]:
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"label_metadata {label_ja!r} 的 {column} 不是合法JSON") from exc
+    if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
+        raise ValueError(f"label_metadata {label_ja!r} 的 {column} 必须是字符串数组")
+    if any(not item.strip() for item in parsed):
+        raise ValueError(f"label_metadata {label_ja!r} 的 {column} 包含空字符串")
+    return [item.strip() for item in parsed]
+
+
+def _validate_canonical_l10n_text(value: str, *, label_ja: str, field: str) -> None:
+    if "http://" in value or "https://" in value or re.search(r"\]\([^)]*\)", value):
+        raise ValueError(f"label_metadata {label_ja!r} 的 {field} 包含链接污染")
+
+
+def build_l10n_metadata_from_db(labels: pd.DataFrame, db_path: Path) -> list[dict]:
+    required_label_columns = {"label_id", "label"}
+    missing_label_columns = required_label_columns - set(labels.columns)
+    if missing_label_columns:
+        raise ValueError(f"生成l10n metadata缺少labels列: {sorted(missing_label_columns)}")
+
+    with sqlite3.connect(db_path) as conn:
+        canonical = pd.read_sql_query(
+            """
+            SELECT label_ja, label_en, label_zh,
+                   operator_ja_json, operator_en_json, operator_zh_json,
+                   wiki_title_ja
+            FROM label_metadata
+            """,
+            conn,
+        )
+    canonical_by_label = canonical.set_index("label_ja", drop=False).to_dict(orient="index")
+    missing_labels = sorted(set(labels["label"]) - set(canonical_by_label))
+    if missing_labels:
+        raise ValueError(
+            "label_metadata缺少当前数据集标签，拒绝从images旧字段或既有JSON回填: "
+            f"{missing_labels}"
+        )
+
+    result = []
+    for row in labels.itertuples(index=False):
+        source = canonical_by_label[row.label]
+        operators = {
+            language: _parse_l10n_json_array(
+                source[f"operator_{language}_json"],
+                label_ja=row.label,
+                column=f"operator_{language}_json",
+            )
+            for language in ("ja", "en", "zh")
+        }
+        if len({len(values) for values in operators.values()}) != 1:
+            raise ValueError(f"label_metadata {row.label!r} 的三语operator数组长度不一致")
+        if len(operators["ja"]) != len(set(operators["ja"])):
+            raise ValueError(f"label_metadata {row.label!r} 包含重复operator_ja")
+
+        scalar_fields = {
+            "label_en": str(source["label_en"]).strip(),
+            "label_zh": str(source["label_zh"]).strip(),
+            "wiki_title_ja": str(source["wiki_title_ja"]).strip(),
+        }
+        if not scalar_fields["label_en"] or not scalar_fields["label_zh"]:
+            raise ValueError(f"label_metadata {row.label!r} 的英中label翻译不能为空")
+        for field, value in scalar_fields.items():
+            _validate_canonical_l10n_text(value, label_ja=row.label, field=field)
+        for language, values in operators.items():
+            for value in values:
+                _validate_canonical_l10n_text(
+                    value,
+                    label_ja=row.label,
+                    field=f"operator_{language}_json",
+                )
+        if re.search(r"[ぁ-んァ-ヶ一-龠々]", scalar_fields["label_en"]):
+            raise ValueError(f"label_metadata {row.label!r} 的label_en包含日文污染")
+        if re.search(r"[ぁ-んァ-ヶ]", scalar_fields["label_zh"]):
+            raise ValueError(f"label_metadata {row.label!r} 的label_zh包含日文假名污染")
+        if any("/" in value for value in operators["ja"]):
+            raise ValueError(f"label_metadata {row.label!r} 的operator_ja包含双语言分隔符")
+        if any(re.search(r"[ぁ-んァ-ヶ一-龠々]", value) for value in operators["en"]):
+            raise ValueError(f"label_metadata {row.label!r} 的operator_en包含日文污染")
+        if any(re.search(r"[ぁ-んァ-ヶ]", value) for value in operators["zh"]):
+            raise ValueError(f"label_metadata {row.label!r} 的operator_zh包含日文假名污染")
+
+        result.append(
+            {
+                "id": int(row.label_id),
+                "label": {
+                    "ja": row.label,
+                    "en": scalar_fields["label_en"],
+                    "zh": scalar_fields["label_zh"],
+                },
+                "operator": operators,
+                "wiki_title_ja": scalar_fields["wiki_title_ja"],
+            }
+        )
+    return result
+
+
+def write_l10n_metadata(labels: pd.DataFrame, db_path: Path, output_path: Path) -> int:
+    l10n_metadata = build_l10n_metadata_from_db(labels, db_path)
+    temporary_path = output_path.with_suffix(f"{output_path.suffix}.tmp")
+    temporary_path.write_text(
+        json.dumps(l10n_metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary_path.replace(output_path)
+    return len(l10n_metadata)
+
+
 def flush_crop_save_updates(db_path: Path, updates: list[tuple[str, int]]) -> None:
     if not updates:
         return
@@ -233,6 +343,7 @@ def write_dataset_manifest(
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
         "metadata_file": crops_storage_config["metadata_file_name"],
         "labels_file": crops_storage_config["labels_file_name"],
+        "l10n_metadata_file": crops_storage_config["l10n_metadata_file_name"],
         "num_samples": int(len(metadata)),
         "num_labels": int(len(labels)),
         "label_column": crops_storage_config["label_column"],
@@ -511,6 +622,7 @@ def main(config: dict | None = None) -> None:
 
         metadata_path = dataset_root / crops_storage_config["metadata_file_name"]
         labels_path = dataset_root / crops_storage_config["labels_file_name"]
+        l10n_metadata_path = dataset_root / crops_storage_config["l10n_metadata_file_name"]
         manifest_path = dataset_root / "manifest.json"
         dataset_root.mkdir(parents=True, exist_ok=True)
         metadata.to_csv(metadata_path, index=False, encoding="utf-8")
@@ -524,7 +636,17 @@ def main(config: dict | None = None) -> None:
 
         logger.info("crop图像保存完成，已成功保存%d条crop数据。", len(metadata))
         logger.info("metadata已保存至%s，labels已保存至%s，manifest已保存至%s。", metadata_path, labels_path, manifest_path)
-        
+        exported_l10n_count = write_l10n_metadata(
+            labels,
+            db_path,
+            l10n_metadata_path,
+        )
+        logger.info(
+            "已从label_metadata规范表导出%d条多语言metadata至%s。",
+            exported_l10n_count,
+            l10n_metadata_path,
+        )
+
         return constants.STAGE_COMPLETED #type:ignore flatten格式处理完成，退出程序
 
 

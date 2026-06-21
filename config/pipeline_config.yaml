@@ -162,6 +162,10 @@ lr_prediction: # 对未知数据应用LR模型
   prediction_file_name: "lr_predictions.csv"
   sync_to_db: true
 
+label_metadata_translation:
+  # 相对path.data_root；缺失label会导出到此CSV并中断pipeline，填写后重跑本阶段回写数据库。
+  review_file_path: "review/label_metadata_translation.csv"
+
 crops_storage:
   format: 'flatten' #存储格式，可选'flatten'或'nested'。'flatten'表示将所有crop数据存储在同一层级的表中，'nested'表示按照series或submodel等层级结构存储。
   reprocess: false #为false则跳过已经存储crop的数据
@@ -177,11 +181,12 @@ crops_storage:
   image_extension: "jpeg"
   metadata_file_name: "metadata.csv"
   labels_file_name: "labels.csv"
+  l10n_metadata_file_name: "l10n_metadata.json"
   label_column: "fine_grained_series"
   manual_correction_invalidate_metadata_columns: ["submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery"]
   manual_correction_refill_operator_columns: ["operator_en", "operator_jp"]
   manual_correction_refill_submodel_bandai_columns: ["submodel", "bandai"]
-  image_metadata_columns: ['downloaded_path',"series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
+  image_metadata_columns: ['downloaded_path', "wiki_title", "series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
   metadata_columns: ["image_path", "label_id", "label", "label_en", "manual_reviewed", "series", "fine_grained_series", "submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery", "power_type"]
   jpeg_quality: 95
 

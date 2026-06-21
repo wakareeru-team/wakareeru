@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS images (
 
     -- Label provenance
     series              TEXT NOT NULL,
-    wiki_title          TEXT,
+    wiki_title          TEXT,               -- Legacy per-image provenance; not used to export l10n metadata
     power_type          TEXT,               -- EMU | DMU | Electric Locomotive | Diesel Locomotive | Steam Locomotive | Electro-diesel Multiple Unit
     operator_en_json    TEXT NOT NULL,      -- JSON array, e.g. ["JR East"]
 
@@ -51,15 +51,32 @@ CREATE TABLE IF NOT EXISTS images (
     -- LLM-extracted metadata from category_path (img_filter_v2 step 3)
     submodel            TEXT,               -- e.g. "E231-500"
     bandai              TEXT,               -- 番台, e.g. "500"
-    operator_en         TEXT,
-    operator_jp         TEXT,
+    operator_en         TEXT,               -- Legacy LLM extraction; retained for pipeline/review compatibility
+    operator_jp         TEXT,               -- Legacy LLM extraction; retained for pipeline/review compatibility
     special_formation   TEXT,
     special_livery      TEXT,
+    llm_metadata_processed INTEGER NOT NULL DEFAULT 0, -- stage_06 checkpoint; new images only
 
     -- Fine-grained label after manual subtype splitting (stage_08 fine-grained step)
     fine_grained_series TEXT,              -- e.g. "E233系-2000番台"; NULL → copy series at training time
 
     UNIQUE (series, category, file_title)
+);
+
+-- Canonical and sole source for the generated dataset/l10n_metadata.json artifact.
+-- The similarly named fields on images are retained as legacy per-image metadata,
+-- but stage_14 must not use them to construct localized label metadata.
+CREATE TABLE IF NOT EXISTS label_metadata (
+    label_ja          TEXT PRIMARY KEY,
+    label_en          TEXT NOT NULL,
+    label_zh          TEXT NOT NULL,
+    operator_ja_json  TEXT NOT NULL DEFAULT '[]',
+    operator_en_json  TEXT NOT NULL DEFAULT '[]',
+    operator_zh_json  TEXT NOT NULL DEFAULT '[]',
+    wiki_title_ja     TEXT NOT NULL DEFAULT '',
+    note              TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Many-to-many: file ↔ category memberships across the crawl depth.
