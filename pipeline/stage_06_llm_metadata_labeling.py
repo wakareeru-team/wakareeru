@@ -143,16 +143,7 @@ def main(config: dict | None = None):
     effort = llm_config['reasoning_effort']
     batch_size = int(llm_config["batch_size"])
     max_retries = int(llm_config["max_retries"])
-    if os.environ.get("OPENAI_API_KEY") is None:
-        logger.error("没有设置 OPENAI_API_KEY 环境变量，无法继续执行 LLM 相关的步骤。请设置环境变量后重试。")
-        return
-    
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
-    openai_client = OpenAI()
-    tools = build_web_search_tools(llm_config)
-    tool_choice = llm_config["web_search_tool_choice"] if tools else None
-    if tools:
-        logger.info("LLM metadata labeling 已启用 OpenAI web_search tool: %s", tools)
     details_path = utils.join_data_root(
         config["path"]["llm_category_details_path"],
         config=config,
@@ -162,9 +153,13 @@ def main(config: dict | None = None):
         category_paths = pd.read_sql_query("""
                                     SELECT category_path_json
                                     FROM images
+                                    WHERE llm_metadata_processed = 0
                                     GROUP BY category_path_json
                                     """, conn)
-    logger.info(f"共发现 {len(category_paths)} 条唯一的 category_path，准备进行LLM解析...")
+    logger.info("共发现%d条尚未回写的唯一category_path。", len(category_paths))
+    if category_paths.empty:
+        logger.info("没有待处理的LLM metadata，跳过Stage 06。")
+        return
 
     llm_details = load_llm_details_checkpoint(details_path)
     completed_paths = (
@@ -176,43 +171,53 @@ def main(config: dict | None = None):
         ~category_paths["category_path_json"].astype(str).isin(completed_paths)
     ].reset_index(drop=True)
     logger.info(
-        "LLM checkpoint: 已完成 %d 条；待处理 %d 条。",
+        "LLM checkpoint: 已缓存 %d 条；本轮需请求 %d 条。",
         len(completed_paths),
         len(pending_category_paths),
     )
-    
-    with tqdm(total=len(pending_category_paths), desc="LLM metadata labeling", unit="path") as pbar:
-        for batch in _batched(pending_category_paths.itertuples(index=False), batch_size):
-            # Send parsed category_path lists, not raw JSON strings, so the prompt is cleaner.
-            batch_dict = [
-                {"category_path": json.loads(row.category_path_json)}
-                for row in batch
-            ]
-            batch_details = request_details_batch(
-                openai_client,
-                OPENAI_MODEL_NAME,
-                constants.LLM_LABEL_DETAIL_PROMPT,
-                effort,
-                batch_dict,
-                max_retries=max_retries,
-                tools=tools,
-                tool_choice=tool_choice,
-            )
 
-            batch_rows = []
-            for row, detail in zip(batch, batch_details):
-                detail["category_path_json"] = row.category_path_json
-                detail["category_path"] = json.loads(row.category_path_json)
-                batch_rows.append(detail)
+    if not pending_category_paths.empty:
+        if os.environ.get("OPENAI_API_KEY") is None:
+            logger.error("没有设置 OPENAI_API_KEY 环境变量，无法处理新的category_path。请设置环境变量后重试。")
+            return
+        openai_client = OpenAI()
+        tools = build_web_search_tools(llm_config)
+        tool_choice = llm_config["web_search_tool_choice"] if tools else None
+        if tools:
+            logger.info("LLM metadata labeling 已启用 OpenAI web_search tool: %s", tools)
 
-            llm_details = append_llm_details_checkpoint(details_path, llm_details, batch_rows)
-            pbar.update(len(batch_details))
-            logger.info(
-                "已处理: %d/%d pending category paths；checkpoint 总计 %d 条。",
-                pbar.n,
-                len(pending_category_paths),
-                len(llm_details),
-            )
+        with tqdm(total=len(pending_category_paths), desc="LLM metadata labeling", unit="path") as pbar:
+            for batch in _batched(pending_category_paths.itertuples(index=False), batch_size):
+                # Send parsed category_path lists, not raw JSON strings, so the prompt is cleaner.
+                batch_dict = [
+                    {"category_path": json.loads(row.category_path_json)}
+                    for row in batch
+                ]
+                batch_details = request_details_batch(
+                    openai_client,
+                    OPENAI_MODEL_NAME,
+                    constants.LLM_LABEL_DETAIL_PROMPT,
+                    effort,
+                    batch_dict,
+                    max_retries=max_retries,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                )
+
+                batch_rows = []
+                for row, detail in zip(batch, batch_details):
+                    detail["category_path_json"] = row.category_path_json
+                    detail["category_path"] = json.loads(row.category_path_json)
+                    batch_rows.append(detail)
+
+                llm_details = append_llm_details_checkpoint(details_path, llm_details, batch_rows)
+                pbar.update(len(batch_details))
+                logger.info(
+                    "已处理: %d/%d pending category paths；checkpoint 总计 %d 条。",
+                    pbar.n,
+                    len(pending_category_paths),
+                    len(llm_details),
+                )
 
     if llm_details.empty:
         logger.warning("没有可回写的 LLM metadata，跳过数据库更新。")
@@ -223,6 +228,15 @@ def main(config: dict | None = None):
     DETAIL_COLS = ["submodel", "bandai", "operator_en", "operator_jp", "special_formation", "special_livery"]
 
     llm_details = pd.read_csv(details_path, dtype={"bandai": str})
+    target_paths = set(category_paths["category_path_json"].astype(str))
+    llm_details = llm_details[
+        llm_details["category_path_json"].astype(str).isin(target_paths)
+    ].copy()
+    missing_checkpoint_paths = sorted(
+        target_paths - set(llm_details["category_path_json"].astype(str))
+    )
+    if missing_checkpoint_paths:
+        raise ValueError(f"LLM checkpoint缺少待回写category_path: {missing_checkpoint_paths}")
 
     def sql_null(v):
         """Coerce empty/sentinel strings to None so SQLite stores NULL."""
@@ -249,10 +263,22 @@ def main(config: dict | None = None):
 
         set_clause = ", ".join(f"{col} = ?" for col in DETAIL_COLS)
         update_rows = llm_details[DETAIL_COLS + ["category_path_json"]].values.tolist()
-        conn.executemany(f"UPDATE images SET {set_clause} WHERE category_path_json = ?", update_rows)
+        before_changes = conn.total_changes
+        conn.executemany(
+            f"""
+            UPDATE images
+            SET {set_clause}, llm_metadata_processed = 1
+            WHERE category_path_json = ? AND llm_metadata_processed = 0
+            """,
+            update_rows,
+        )
         conn.commit()
 
-        logger.info(f"已写入的 category details: {len(update_rows)}")
+        logger.info(
+            "已用%d条category metadata增量回写%d条新图片；既有已处理图片未覆盖。",
+            len(update_rows),
+            conn.total_changes - before_changes,
+        )
 
 
 if __name__ == "__main__":

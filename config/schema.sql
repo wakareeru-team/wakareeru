@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS images (
     operator_jp         TEXT,               -- Legacy LLM extraction; retained for pipeline/review compatibility
     special_formation   TEXT,
     special_livery      TEXT,
+    llm_metadata_processed INTEGER NOT NULL DEFAULT 0, -- stage_06 checkpoint; new images only
 
     -- Fine-grained label after manual subtype splitting (stage_08 fine-grained step)
     fine_grained_series TEXT,              -- e.g. "E233系-2000番台"; NULL → copy series at training time
