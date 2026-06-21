@@ -200,6 +200,11 @@ KEEP_LABELS = {"exterior", "uncertain"}
 
 # ================ LLM解析车型信息 ================
 
+LLM_OPERATOR_JP_MANUAL_OVERRIDES = {
+    "日本国有鉄道": "国鉄",
+    "国鉄": "国鉄",
+}
+
 LLM_LABEL_DETAIL_PROMPT = """
 你是一个日本铁路图片分类助手，通过Wikipedia Commons图片的分类路径来判断图片所属铁路车辆的各种信息，包括子车型，番台，特殊编成，特殊涂装，运行线路，运营公司等。
 请在必要时通过web_search查找相关信息辅助判断，不要随意猜测。

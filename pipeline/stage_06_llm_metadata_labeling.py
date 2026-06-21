@@ -124,6 +124,15 @@ def append_llm_details_checkpoint(details_path, existing_details: pd.DataFrame, 
     return merged
 
 
+def apply_operator_jp_manual_override(value: str | None) -> str | None:
+    if value is None:
+        return None
+    for source, target in constants.LLM_OPERATOR_JP_MANUAL_OVERRIDES.items():
+        if value == source or value.startswith(f"{source} ("):
+            return target
+    return value
+
+
 
 def main(config: dict | None = None):
     if config is None:
@@ -224,6 +233,9 @@ def main(config: dict | None = None):
 
     # Only normalize the text detail columns — category_path holds lists and must not be touched.
     llm_details[DETAIL_COLS] = llm_details[DETAIL_COLS].map(sql_null)
+    llm_details["operator_jp"] = llm_details["operator_jp"].map(
+        apply_operator_jp_manual_override
+    )
 
     missing = [c for c in ["category_path_json", *DETAIL_COLS] if c not in llm_details.columns]
     if missing:
