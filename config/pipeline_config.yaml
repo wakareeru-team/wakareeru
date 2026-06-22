@@ -76,7 +76,7 @@ gdino:
   text_threshold: 0.2
   nms_iou_threshold: 0.5
   batch_size: 4
-  outer_batch_size: 80
+  outer_batch_size: 30
   reprocess: false
 
 crop_filtering:

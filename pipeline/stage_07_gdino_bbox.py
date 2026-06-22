@@ -1,3 +1,4 @@
+import gc
 import os
 import sqlite3
 
@@ -34,6 +35,14 @@ def detach_to_cpu(value):
     return value
 
 
+def empty_accelerator_cache():
+    """释放当前加速后端未占用的缓存内存。"""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
+
 def gdino_text_label_for_power_type(power_type):
     # Grounding-DINO processor 需要每张图对应一个 label 列表，所以这里返回 ["..."] 而不是普通字符串。
     if power_type in ["Steam Locomotive", "Diesel Locomotive", "Electric Locomotive"]:
@@ -59,8 +68,7 @@ def gdino_detection_with_preloaded_images(processor, model, device, PIL_images, 
         outputs = detach_to_cpu(model(**inputs))
     token_ids = inputs["input_ids"].detach().cpu()
     del inputs
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    empty_accelerator_cache()
     if pbar is not None:
         pbar.update(len(PIL_images))
     return outputs, token_ids, target_sizes
@@ -225,7 +233,9 @@ def main(config: dict | None = None):
                         processor, outputs, token_ids, target_sizes, box_threshold, text_threshold
                     )
                     outer_results.extend(nms_postprocess(batch_results, nms_iou_threshold))
-                    del outputs, token_ids
+                    del outputs, token_ids, target_sizes, batch_results, inner_images, inner_labels
+                    empty_accelerator_cache()
+                    gc.collect()
 
                 del outer_images
                 upsert_crops(conn, outer_df, outer_results, model_id, nms_iou_threshold)
@@ -235,6 +245,9 @@ def main(config: dict | None = None):
                     image_ids,
                 )
                 conn.commit()
+                del outer_results, outer_labels, outer_df, image_ids
+                empty_accelerator_cache()
+                gc.collect()
 
     logger.info("GDINO bbox 检测完成。")
 
