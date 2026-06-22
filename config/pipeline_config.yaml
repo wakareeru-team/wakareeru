@@ -7,8 +7,8 @@ path:
   db_path: "commons_image_manifest.sqlite"
   raw_img_dir: "img"
   cache_dir: "cache"
-  series_list_path: 'jr_east_freight_series.csv'
-  series_commons_path: 'jr_east_freight_series_wiki_commons.csv'
+  series_list_path: 'jr_honshu_freight_series.csv'
+  series_commons_path: 'jr_honshu_series_wiki_commons.csv'
   commons_review_path: 'review/commons_root_review.csv'
   manual_series_overrides_path: 'config/manual_series_overrides.csv'
   img_crawl_log_path: 'img_crawl_checkpoint.csv'
@@ -25,7 +25,7 @@ crawler:
   # Only active operators will be parsed and included in the final dataset. 
   # However, shared series with other operators will still be included 
   # even if the operator is not active.
-  active_operators: ["JR東日本", "JR貨物"]
+  active_operators: ["JR東日本", "JR貨物", "JR東海", "JR西日本"]
   full_series_crawling: true
   manifest_max_files_per_category: 50
   # 0 = only root category; positive numbers recurse into subcategories; -1 = unlimited.

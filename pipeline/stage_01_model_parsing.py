@@ -217,7 +217,9 @@ def main(config = None):
     filtered_df = all_df[~all_df['type'].isin(excluding_types)]
     #现在滤除二级，对象为旧式营业车和事业用车
     exclduing_subtypes = constants.EXCLUDED_SUBTYPES
-    final_df = filtered_df[~filtered_df['subtype'].isin(exclduing_subtypes)]
+    filtered_df = filtered_df[~filtered_df['subtype'].isin(exclduing_subtypes)]
+    excluding_statuses = constants.EXCLUDED_STATUSES
+    final_df = filtered_df[~filtered_df['status'].isin(excluding_statuses)]
     final_df['type'].value_counts()
     final_df['subtype'].value_counts()
 

@@ -34,6 +34,8 @@ EXCLUDED_TYPES = ["貨車", "客車"]
 
 EXCLUDED_SUBTYPES = ["旧形営業用", "旧形事業用"]
 
+EXCLUDED_STATUSES = ["導入予定"]
+
 
 OPERATOR_PREFIX = {
     "JR東日本": "JR East",
