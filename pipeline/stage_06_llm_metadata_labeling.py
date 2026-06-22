@@ -43,6 +43,39 @@ def build_web_search_tools(llm_config: dict) -> list[dict]:
     return [tool]
 
 
+def build_operator_glossary_from_label_metadata(db_path) -> str:
+    """Build prompt-only operator terminology from canonical label metadata."""
+    pairs: set[tuple[str, str]] = set()
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT operator_ja_json, operator_en_json FROM label_metadata"
+        ).fetchall()
+
+    for operator_ja_json, operator_en_json in rows:
+        operators_ja = json.loads(operator_ja_json)
+        operators_en = json.loads(operator_en_json)
+        if not isinstance(operators_ja, list) or not isinstance(operators_en, list):
+            raise ValueError("label_metadata operator fields must be JSON arrays")
+        if len(operators_ja) != len(operators_en):
+            raise ValueError("label_metadata operator ja/en arrays must have equal lengths")
+        pairs.update(
+            (str(operator_ja).strip(), str(operator_en).strip())
+            for operator_ja, operator_en in zip(operators_ja, operators_en)
+            if str(operator_ja).strip() and str(operator_en).strip()
+        )
+
+    if not pairs:
+        return ""
+
+    glossary_lines = [
+        f'- operator_jp="{operator_ja}", operator_en="{operator_en}"'
+        for operator_ja, operator_en in sorted(pairs)
+    ]
+    return "\n\nlabel_metadata规范运营公司术语（必须原样使用）：\n" + "\n".join(
+        glossary_lines
+    )
+
+
 
 
 def parse_llm_json_array(text: str) -> list[dict]:
@@ -144,6 +177,10 @@ def main(config: dict | None = None):
     batch_size = int(llm_config["batch_size"])
     max_retries = int(llm_config["max_retries"])
     db_path = utils.join_data_root(config["path"]["db_path"], config=config)
+    system_prompt = (
+        constants.LLM_LABEL_DETAIL_PROMPT
+        + build_operator_glossary_from_label_metadata(db_path)
+    )
     details_path = utils.join_data_root(
         config["path"]["llm_category_details_path"],
         config=config,
@@ -196,7 +233,7 @@ def main(config: dict | None = None):
                 batch_details = request_details_batch(
                     openai_client,
                     OPENAI_MODEL_NAME,
-                    constants.LLM_LABEL_DETAIL_PROMPT,
+                    system_prompt,
                     effort,
                     batch_dict,
                     max_retries=max_retries,
