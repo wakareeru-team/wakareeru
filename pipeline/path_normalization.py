@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Unicode normalization helpers for downloaded image paths."""
+
+from __future__ import annotations
 
 import sqlite3
 import unicodedata
@@ -14,6 +14,15 @@ def normalize_text(value: str) -> str:
 
 def normalize_rel_path(value: str) -> str:
     return "/".join(normalize_text(part) for part in value.replace("\\", "/").split("/"))
+
+
+def _paths_refer_to_same_file(source: Path, target: Path) -> bool:
+    if not target.exists():
+        return False
+    try:
+        return source.samefile(target)
+    except OSError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -44,7 +53,12 @@ def collect_rename_plan(root: Path) -> list[RenamePlan]:
         normalized_name = normalize_text(path.name)
         if normalized_name == path.name:
             continue
-        plans.append(RenamePlan(source=path, target=path.with_name(normalized_name)))
+        target = path.with_name(normalized_name)
+        # Normalization-insensitive filesystems such as macOS APFS may expose an
+        # NFD directory entry while resolving its NFC spelling to the same inode.
+        if _paths_refer_to_same_file(path, target):
+            continue
+        plans.append(RenamePlan(source=path, target=target))
     return plans
 
 
@@ -55,7 +69,11 @@ def validate_rename_plan(plans: list[RenamePlan]) -> None:
         if plan.target in planned_targets:
             raise FileExistsError(f"multiple paths would normalize to {plan.target}")
         planned_targets.add(plan.target)
-        if plan.target.exists() and plan.target not in planned_sources:
+        if (
+            plan.target.exists()
+            and plan.target not in planned_sources
+            and not _paths_refer_to_same_file(plan.source, plan.target)
+        ):
             raise FileExistsError(f"normalization collision: {plan.source} -> {plan.target}")
 
 

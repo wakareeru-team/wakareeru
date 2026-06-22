@@ -170,7 +170,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 | `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV，并排除 `導入予定` 等不纳入数据集的状态；人工确认的系列例外保留 |
 | `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射 |
 | `manifest_crawling` | `stage_03_manifest_crawling.py` | 查询 Commons 分类树，写入 `categories` 与 `images` |
-| `img_crawling` | `stage_04_img_crawler.py` | 下载图片，更新 `images.download_status`，并将图片文件名与 `images.downloaded_path` 规范化为 Unicode NFC |
+| `img_crawling` | `stage_04_img_crawler.py` | 下载图片，更新 `images.download_status`，并将图片文件名与 `images.downloaded_path` 规范化为 Unicode NFC；macOS/APFS 上 NFC/NFD 指向同一 inode 时跳过文件重命名，仅将其视为路径别名 |
 | `siglip_filter` | `stage_05_siglip_image_filtering.py` | 用 SigLIP2 过滤内饰、局部细节等不适合训练的图片 |
 | `llm_labeling` | `stage_06_llm_metadata_labeling.py` | 用 OpenAI API 从分类路径抽取番台、子型号、运营公司等元数据；运行时从 `label_metadata` 生成 operator 日英术语表并附加到提示词，同时约束引用与输出格式；只回写 `llm_metadata_processed = 0` 的新图片，同路径已有 checkpoint 时直接复用，避免覆盖既有 metadata |
 | `fine_grain_series` | `stage_08_fine_grain_series.py` | 根据 LLM 元数据和人工规则构造 `fine_grained_series` |
