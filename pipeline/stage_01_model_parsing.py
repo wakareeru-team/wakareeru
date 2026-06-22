@@ -219,7 +219,9 @@ def main(config = None):
     exclduing_subtypes = constants.EXCLUDED_SUBTYPES
     filtered_df = filtered_df[~filtered_df['subtype'].isin(exclduing_subtypes)]
     excluding_statuses = constants.EXCLUDED_STATUSES
-    final_df = filtered_df[~filtered_df['status'].isin(excluding_statuses)]
+    excluded_status = filtered_df['status'].isin(excluding_statuses)
+    status_exception = filtered_df['series'].isin(constants.EXCLUDED_STATUS_SERIES_EXCEPTIONS)
+    final_df = filtered_df[~excluded_status | status_exception]
     final_df['type'].value_counts()
     final_df['subtype'].value_counts()
 

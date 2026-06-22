@@ -1,13 +1,21 @@
 series,wiki_title,action,set_series,set_wiki_title,full_name,operator_jp,operator_en,commons_prefix,commons_root_category,commons_operator_roots,needs_review,reason
-E001形,TRAIN SUITE 四季島,set,,,JR東日本E001形クルーズトレイン「TRAIN SUITE 四季島」,,,,,,,manual full name
-481系,国鉄485系電車,set,,,,,,JNR 485,,,,481/483/485/489 share Commons category
+E001形,TRAIN SUITE 四季島,set,,,JR東日本E001形クルーズトレイン「TRAIN SUITE 四季島」,,,JR East E001,JR East E001,{'JR East': 'JR East E001'},False,manual full name and existing Commons root
+481系,国鉄485系電車,set,,,,,,JNR 485,JNR 485,{'JR East': 'JNR 485'},False,481/483/485/489 share Commons category
 921形,ドクターイエロー#921形,set,922形,,,['国鉄'],['JNR'],Shinkansen 922,Shinkansen 922,{'JNR': 'Shinkansen 922'},False,manual correction from 921 to 922
 952形,新幹線952形・953形電車,set,952/953形,,,,,Shinkansen 952,Shinkansen 952/953,{'JR East': 'Shinkansen 952/953'},False,merge 952 and 953
 953形,新幹線952形・953形電車,exclude,,,,,,,,,,merged into 952/953形
 キハ100系,JR東日本キハ100系・キハ110系気動車,set,,,,,,JR East KiHa 100 series,JR East KiHa 100 series,{'JR East': 'JR East KiHa 100 series'},False,manual completion
 キハ110系,JR東日本キハ100系・キハ110系気動車,set,,,,,,JR East KiHa 110 series,JR East KiHa 110 series,{'JR East': 'JR East KiHa 110 series'},False,manual completion
 EF510形,JR貨物EF510形電気機関車,set,,,,"['JR東日本', 'JR貨物']","['JR East', 'JR Freight']",JR Freight EF510,JR Freight EF510,"{'JR East': 'JR East EF510-500', 'JR Freight': 'JR Freight EF510'}",False,manual multi-operator root
-415系,JR西日本415系電車,set,,国鉄415系電車,,,,JNR 415,JNR 415,"{'JR East': 'JNR 415', 'JR West': 'JNR 415'}",False,merge expanded operator row into existing JNR 415 data
+415系,JR西日本415系電車,set,,国鉄415系電車,,"['国鉄','JR東日本', 'JR西日本']","['JNR','JR East', 'JR West']",JNR 415,JNR 415,"{'JR East': 'JNR 415', 'JR West': 'JNR 415'}",False,keep existing JNR 415 mapping and add JR West operator
+L0系,L0系,set,,,,['JR東海'],['JR Central'],Shinkansen L0,Shinkansen L0,{'JR Central': 'Shinkansen L0'},False,manual Commons root
+87系,JR西日本87系気動車,set,,,,['JR西日本'],['JR West'],Twilight Express Mizukaze,Twilight Express Mizukaze,{'JR West': 'Twilight Express Mizukaze'},False,manual Commons root
+キハ121系,JR西日本キハ126系気動車,set,,,,['JR西日本'],['JR West'],JR West Kiha 126,JR West Kiha 126,{'JR West': 'JR West Kiha 126'},False,covered by Kiha 126 Commons category
+キハ122系,JR西日本キハ127系気動車,set,,,,['JR西日本'],['JR West'],JR West Kiha 127,JR West Kiha 127,{'JR West': 'JR West Kiha 127'},False,covered by Kiha 127 Commons category
+DEC743形,JR西日本DEC743形気動車,exclude,,,,,,,,,,excluded by manual review
+国鉄DF50形,国鉄DF50形ディーゼル機関車,set,,,,['JR西日本'],['JR West'],JNR DF50,JNR DF50,{'JR West': 'JNR DF50'},False,manual Commons root
+912形,新幹線912形ディーゼル機関車,set,,,,['JR西日本'],['JR West'],Shinkansen 912,Shinkansen 912,{'JR West': 'Shinkansen 912'},False,manual Commons root
+931形,新幹線931形貨車,exclude,,,,,,,,,,excluded by manual review
 DD19形,国鉄DD17形ディーゼル機関車#DD19形,set,,,,,,JR East DD19,JR East DD19,{'JR East': 'JR East DD19'},False,manual completion
 キハ141系,JR北海道キハ141系気動車,set,,,,['JR北海道'],['JR Hokkaido'],JR Hokkaido Kiha 141,JR Hokkaido Kiha 141,{'JR Hokkaido': 'JR Hokkaido Kiha 141'},False,manual completion
 DD17形,国鉄DD17形ディーゼル機関車,exclude,,,,,,,,,,no Commons root; old crawler skipped rootless rows

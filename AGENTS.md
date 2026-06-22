@@ -167,7 +167,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 
 | Key | Script | 作用 |
 | --- | --- | --- |
-| `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV，并排除 `導入予定` 等不纳入数据集的状态 |
+| `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV，并排除 `導入予定` 等不纳入数据集的状态；人工确认的系列例外保留 |
 | `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射 |
 | `manifest_crawling` | `stage_03_manifest_crawling.py` | 查询 Commons 分类树，写入 `categories` 与 `images` |
 | `img_crawling` | `stage_04_img_crawler.py` | 下载图片，更新 `images.download_status`，并将图片文件名与 `images.downloaded_path` 规范化为 Unicode NFC |
