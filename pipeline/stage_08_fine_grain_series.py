@@ -77,16 +77,20 @@ def apply_fine_grained_labels(conn: sqlite3.Connection, rules_path: str | Path) 
     ).fillna("")
 
     rule_counts = [0] * len(rules)
+    rule_match_counts = [0] * len(rules)
     updates: list[tuple[str, int]] = []
 
     for _, img in images_df.iterrows():
         img_dict = img.to_dict()
         label = img_dict["series"]
+        rule_applied = False
         for i, rule in enumerate(rules):
             if matches_rule(img_dict, rule):
-                label = rule["fine_grained_series"]
-                rule_counts[i] += 1
-                break
+                rule_match_counts[i] += 1
+                if not rule_applied:
+                    label = rule["fine_grained_series"]
+                    rule_counts[i] += 1
+                    rule_applied = True
         updates.append((label, int(img_dict["id"])))
 
     conn.executemany("UPDATE images SET fine_grained_series = ? WHERE id = ?", updates)
@@ -101,6 +105,20 @@ def apply_fine_grained_labels(conn: sqlite3.Connection, rules_path: str | Path) 
             rule.get("fine_grained_series", ""),
             rule_counts[i],
         )
+    unmatched_rule_indices = [i for i, count in enumerate(rule_match_counts) if count == 0]
+    if unmatched_rule_indices:
+        logger.warning(
+            "fine_grained_series: %d rules matched no images:",
+            len(unmatched_rule_indices),
+        )
+        for i in unmatched_rule_indices:
+            rule = rules[i]
+            logger.warning(
+                "  rule %d [%s] -> '%s'",
+                i,
+                rule_summary(rule),
+                rule.get("fine_grained_series", ""),
+            )
     logger.info(
         "fine_grained_series: %d matched rules, %d defaulted to series (%d total)",
         matched,

@@ -54,11 +54,12 @@ async def fetch_all(operators: list[tuple[str, str, str]]) -> dict[str, tuple[st
 def parse_vehicle_wikitext(lines: list[str]) -> list[dict]:
     link_re = re.compile(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]')
 
-    # 首字符允许数字，覆盖 113系/271系 等纯数字开头的 JR West/Central 型号
+    # 保留既有车型格式，并补充 0系等“单个数字 + 系/形”的车型。
     series_re = re.compile(
-        r'^[A-Za-z゠-ヿ一-鿿\d]'  # 首字符（含数字）
-        r'[A-Za-z゠-ヿ一-鿿\-]*'   # 前缀（含连字符，如HB-E）
-        r'\d+(?:系|形)?$'           # 数字结尾，可选系/形
+        r'^(?:'
+        r'[A-Za-z゠-ヿ一-鿿\d][A-Za-z゠-ヿ一-鿿\-]*\d+(?:系|形)?'
+        r'|\d(?:系|形)'
+        r')$'
     )
 
     results = []
