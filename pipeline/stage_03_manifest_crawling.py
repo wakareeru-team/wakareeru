@@ -640,8 +640,6 @@ def crawl_root_manifest_sample(
             all_records.extend(records)
             logger.info('%s：Category:%s -> 本次新增/更新 %d 个文件', row["series"], root_category, len(records))
 
-        purged = purge_non_image_manifest_records(conn)
-        logger.info('MIME 过滤已从 manifest 数据库移除 %d 条非图片记录', purged)
     finally:
         conn.close()
 
