@@ -1,13 +1,10 @@
 import ast
-import datetime
 import json
-import os
 import random
-import re
 import time
+
 import httpx
 import pandas as pd
-import ast
 import sqlite3
 from datetime import datetime, timezone
 
@@ -81,7 +78,7 @@ def select_models_to_crawl(
     models = models[models["commons_root_category"].notna()]
     models = models[models["commons_root_category"].astype(str).str.strip() != ""]
     if "needs_review" in models:
-        models = models[models["needs_review"] != True]
+        models = models[~models["needs_review"]]
 
     full_on = _as_bool(crawler_config["full_series_crawling"])
     if full_on:
@@ -395,6 +392,62 @@ def should_fetch_category_files(
         return True
     return get_category_fetch_status(conn, category) != constants.FETCH_STATUS_OK
 
+
+def subtree_remaining_depth(depth: int, max_depth: int) -> int:
+    """Return how many descendant levels must be complete below this category."""
+    if max_depth == -1:
+        return -1
+    return max_depth - depth
+
+
+def subtree_depth_covers(completed_depth: int, requested_depth: int) -> bool:
+    """Return whether a completed traversal covers the requested relative depth."""
+    return completed_depth == -1 or (
+        requested_depth != -1 and completed_depth >= requested_depth
+    )
+
+
+def get_subtree_checkpoint_depth(
+    conn: sqlite3.Connection,
+    series: str,
+    root_category: str,
+    category: str,
+) -> int | None:
+    row = conn.execute(
+        """
+        SELECT remaining_depth
+        FROM category_tree_checkpoints
+        WHERE series = ? AND root_category = ? AND category = ?
+        """,
+        (series, root_category, category),
+    ).fetchone()
+    return int(row[0]) if row else None
+
+
+def mark_subtree_checkpoint(
+    conn: sqlite3.Connection,
+    series: str,
+    root_category: str,
+    category: str,
+    remaining_depth: int,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO category_tree_checkpoints (
+            series, root_category, category, remaining_depth, completed_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(series, root_category, category) DO UPDATE SET
+            remaining_depth = CASE
+                WHEN category_tree_checkpoints.remaining_depth = -1
+                  OR excluded.remaining_depth = -1 THEN -1
+                ELSE MAX(category_tree_checkpoints.remaining_depth, excluded.remaining_depth)
+            END,
+            completed_at = excluded.completed_at
+        """,
+        (series, root_category, category, remaining_depth, utc_now()),
+    )
+
 # ================== Manifest Crawling 流程 ==================
 
 def should_skip_category(row: pd.Series, category: str) -> str | None:
@@ -409,13 +462,12 @@ def collect_category_records(
     depth: int,
     max_depth: int,
     max_files_per_category: int,
-    visited_paths: set[tuple[str, ...]],
+    visited_categories: set[str],
 ) -> list[dict]:
     """Collect image records from a category and optionally recurse into subcategories."""
-    path_key = tuple(path)
-    if path_key in visited_paths:
+    if category in visited_categories:
         return []
-    visited_paths.add(path_key)
+    visited_categories.add(category)
 
     records = build_image_records(
         row, category, max_files=max_files_per_category, category_path=path
@@ -437,7 +489,7 @@ def collect_category_records(
                 depth=depth + 1,
                 max_depth=max_depth,
                 max_files_per_category=max_files_per_category,
-                visited_paths=visited_paths,
+                visited_categories=visited_categories,
             )
         )
     return records
@@ -451,19 +503,34 @@ def crawl_category_records_with_checkpoint(
     depth: int,
     max_depth: int,
     max_files_per_category: int,
-    visited_paths: set[tuple[str, ...]],
+    visited_categories: dict[str, int],
     reprocess: bool = False,
-) -> list[dict]:
+) -> tuple[list[dict], bool]:
     """Crawl one category subtree, skipping already fetched category file manifests.
 
-    The checkpoint is category-local: an ``ok`` category skips only direct file
-    fetching for that category. Subcategories are still discovered and visited so
-    a previous interrupted run can resume inside a partially processed subtree.
+    Direct-file and completed-subtree checkpoints are separate. A completed subtree
+    skips remote child discovery only when it covers the requested relative depth.
     """
-    path_key = tuple(path)
-    if path_key in visited_paths:
-        return []
-    visited_paths.add(path_key)
+    remaining_depth = subtree_remaining_depth(depth, max_depth)
+    completed_depth = get_subtree_checkpoint_depth(
+        conn,
+        str(row["series"]),
+        str(row["commons_root_category"]),
+        category,
+    )
+    if (
+        not reprocess
+        and completed_depth is not None
+        and subtree_depth_covers(completed_depth, remaining_depth)
+    ):
+        logger.info("depth=%d Category:%s -> 已有树 checkpoint，跳过子树", depth, category)
+        return [], True
+
+    visited_depth = visited_categories.get(category)
+    if visited_depth is not None and subtree_depth_covers(visited_depth, remaining_depth):
+        return [], True
+    if visited_depth is None or remaining_depth == -1 or visited_depth < remaining_depth:
+        visited_categories[category] = remaining_depth
 
     records: list[dict] = []
     source_scope = (
@@ -493,26 +560,46 @@ def crawl_category_records_with_checkpoint(
         logger.info("depth=%d Category:%s -> 已有 checkpoint，跳过直接文件 manifest", depth, category)
 
     if max_depth != -1 and depth >= max_depth:
-        return records
+        mark_subtree_checkpoint(
+            conn,
+            str(row["series"]),
+            str(row["commons_root_category"]),
+            category,
+            remaining_depth,
+        )
+        return records, True
 
-    subcats = fetch_subcategories(category) or []
+    subcats = fetch_subcategories(category)
+    if subcats is None:
+        return records, False
+
+    subtree_complete = True
     for subcat in subcats:
         if should_skip_category(row, subcat):
             continue
-        records.extend(
-            crawl_category_records_with_checkpoint(
-                conn=conn,
-                row=row,
-                category=subcat,
-                path=path + [subcat],
-                depth=depth + 1,
-                max_depth=max_depth,
-                max_files_per_category=max_files_per_category,
-                visited_paths=visited_paths,
-                reprocess=reprocess,
-            )
+        child_records, child_complete = crawl_category_records_with_checkpoint(
+            conn=conn,
+            row=row,
+            category=subcat,
+            path=path + [subcat],
+            depth=depth + 1,
+            max_depth=max_depth,
+            max_files_per_category=max_files_per_category,
+            visited_categories=visited_categories,
+            reprocess=reprocess,
         )
-    return records
+        records.extend(child_records)
+        subtree_complete = subtree_complete and child_complete
+
+    if subtree_complete:
+        mark_subtree_checkpoint(
+            conn,
+            str(row["series"]),
+            str(row["commons_root_category"]),
+            category,
+            remaining_depth,
+        )
+    return records, subtree_complete
 
 
 def crawl_root_manifest_sample(
@@ -537,7 +624,7 @@ def crawl_root_manifest_sample(
         logger.info("准备爬取 manifest：%d 个车型", len(sample))
         for _, row in tqdm(sample.iterrows(), total=len(sample), desc="Manifest series", unit="series"):
             root_category = row["commons_root_category"]
-            records = crawl_category_records_with_checkpoint(
+            records, _ = crawl_category_records_with_checkpoint(
                 conn=conn,
                 row=row,
                 category=root_category,
@@ -545,9 +632,10 @@ def crawl_root_manifest_sample(
                 depth=0,
                 max_depth=max_depth,
                 max_files_per_category=max_files_per_category,
-                visited_paths=set(),
+                visited_categories={},
                 reprocess=reprocess,
             )
+            conn.commit()
 
             all_records.extend(records)
             logger.info('%s：Category:%s -> 本次新增/更新 %d 个文件', row["series"], root_category, len(records))

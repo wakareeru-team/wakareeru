@@ -10,6 +10,17 @@ CREATE TABLE IF NOT EXISTS categories (
     error           TEXT
 );
 
+-- Completed category-subtree traversals for Stage 03 resume/skip behavior.
+-- remaining_depth is relative to category: 0 = this node only, -1 = unlimited.
+CREATE TABLE IF NOT EXISTS category_tree_checkpoints (
+    series           TEXT NOT NULL,
+    root_category    TEXT NOT NULL,
+    category         TEXT NOT NULL,
+    remaining_depth  INTEGER NOT NULL,
+    completed_at     TEXT NOT NULL,
+    PRIMARY KEY (series, root_category, category)
+);
+
 -- Raw image manifest scraped from Wikimedia Commons.
 -- One row per (series, category, file); images can appear in multiple categories.
 CREATE TABLE IF NOT EXISTS images (

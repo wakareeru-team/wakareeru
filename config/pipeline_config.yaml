@@ -42,8 +42,7 @@ crawler:
   
   download_max_retries: 3
 
-  series_test_scope: ["E231系", "キハ40系", "EF510形", "DD51形", "C57形", "キハ141系","E233系", "E353系", "E657系", "E5系", "E6系", "EF64形", "E7系",'EF81形','E235系','キハ110系',
-        '113系','485系','E217系','E257系']
+  series_test_scope: ["0系"]
 
 # Img filtering configuration
 image_filtering:

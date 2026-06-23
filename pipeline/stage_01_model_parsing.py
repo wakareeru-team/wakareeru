@@ -54,10 +54,11 @@ async def fetch_all(operators: list[tuple[str, str, str]]) -> dict[str, tuple[st
 def parse_vehicle_wikitext(lines: list[str]) -> list[dict]:
     link_re = re.compile(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]')
 
-    # 保留既有车型格式，并补充 0系等“单个数字 + 系/形”的车型。
+    # 保留既有车型格式，并补充 0系及 N700S系等数字后的字母后缀车型。
     series_re = re.compile(
         r'^(?:'
         r'[A-Za-z゠-ヿ一-鿿\d][A-Za-z゠-ヿ一-鿿\-]*\d+(?:系|形)?'
+        r'|[A-Za-z゠-ヿ一-鿿\-]*\d+[A-Za-z]+(?:系|形)'
         r'|\d(?:系|形)'
         r')$'
     )
