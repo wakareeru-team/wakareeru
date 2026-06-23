@@ -168,7 +168,7 @@ Python 版本要求见 `pyproject.toml`；Conda 环境见 `environment.yml`。
 | Key | Script | 作用 |
 | --- | --- | --- |
 | `model_parsing` | `stage_01_model_parsing.py` | 从 Wikipedia wikitext 解析车辆系列 CSV，并排除 `導入予定` 等不纳入数据集的状态；人工确认的系列例外保留 |
-| `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射 |
+| `model_fixing` | `stage_02_model_fixing.py` | 应用人工修正，生成 Commons 根分类映射；有效旧映射按 key 复用，新 key 与历史未联网占位记录会联网补查 |
 | `manifest_crawling` | `stage_03_manifest_crawling.py` | 查询 Commons 分类树，写入 `categories` 与 `images`；按车型、根分类、category 和已覆盖递归深度记录完整子树 checkpoint，重跑时跳过已完成子树 |
 | `img_crawling` | `stage_04_img_crawler.py` | 下载图片，更新 `images.download_status`，并将图片文件名与 `images.downloaded_path` 规范化为 Unicode NFC；macOS/APFS 上 NFC/NFD 指向同一 inode 时跳过文件重命名，仅将其视为路径别名 |
 | `siglip_filter` | `stage_05_siglip_image_filtering.py` | 用 SigLIP2 过滤内饰、局部细节等不适合训练的图片 |

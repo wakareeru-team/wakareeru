@@ -37,6 +37,7 @@ COMMONS_COLUMNS = [
     "needs_review",
     "commons_operator_roots",
 ]
+MISSING_CACHE_DECISION = "增量模式未联网补查，且缺少 Commons 缓存"
 
 
 def parse_json_list(value) -> list[str]:
@@ -204,18 +205,9 @@ def _cached_commons_result(row: pd.Series, cache: dict[tuple[str, str], dict]) -
     cached = cache.get(_row_key(row))
     if not cached:
         return None
+    if cached.get("commons_root_decision") == MISSING_CACHE_DECISION:
+        return None
     return {col: cached.get(col) for col in COMMONS_COLUMNS}
-
-
-def _empty_review_result(row: pd.Series) -> dict:
-    return {
-        "commons_prefix": "",
-        "commons_root_category": None,
-        "commons_root_decision": "增量模式未联网补查，且缺少 Commons 缓存",
-        "commons_candidates": [],
-        "needs_review": True,
-        "commons_operator_roots": {},
-    }
 
 
 def _katakana_to_romaji(text: str) -> str:
@@ -539,11 +531,10 @@ def main(config=None):
     root_rows = []
     fetched_count = 0
     cached_count = 0
-    missing_cache_count = 0
     for _, row in all_model.iterrows():
         manual = _manual_for_row(row, manual_overrides)
         cached = _cached_commons_result(row, commons_cache)
-        should_fetch = manual is not None or cached is None and not commons_cache
+        should_fetch = manual is not None or cached is None
 
         if should_fetch:
             result = find_commons_root(row, manual_overrides=manual_overrides)
@@ -551,9 +542,6 @@ def main(config=None):
         elif cached is not None:
             result = cached
             cached_count += 1
-        else:
-            result = _empty_review_result(row)
-            missing_cache_count += 1
 
         root_rows.append(result)
         status = "待确认" if result["needs_review"] else "通过"
@@ -576,11 +564,10 @@ def main(config=None):
 
     review_count = int(all_model["needs_review"].sum())
     logger.info(
-        "Commons 车型映射共 %d 行；联网验证 %d 行；复用缓存 %d 行；缺少缓存 %d 行；待人工确认 %d 行",
+        "Commons 车型映射共 %d 行；联网验证 %d 行；复用缓存 %d 行；待人工确认 %d 行",
         len(all_model),
         fetched_count,
         cached_count,
-        missing_cache_count,
         review_count,
     )
 
@@ -590,7 +577,7 @@ def main(config=None):
 
     review_path = utils.join_data_root(config["path"]["commons_review_path"], config=config)
     os.makedirs(os.path.dirname(review_path), exist_ok=True)
-    review_df = all_model[all_model["needs_review"] == True]
+    review_df = all_model[all_model["needs_review"]]
     review_df.to_csv(review_path, index=False, encoding="utf-8")
     if not review_df.empty:
         logger.warning("仍有 %d 行需要人工确认，已导出到 %s", len(review_df), config["path"]["commons_review_path"])
